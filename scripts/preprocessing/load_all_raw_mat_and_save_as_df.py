@@ -5,33 +5,37 @@ import sys
 import subprocess
 import logging
 import pandas as pd
-from config.base_config import BaseConfig
-from src.data.extract_data_from_mat_files import (
+
+from socialgaze.config.base_config import BaseConfig
+from socialgaze.data.extract_data_from_mat_files import (
     process_position_file,
     process_time_file,
     process_pupil_file,
     process_roi_rects_file,
 )
 
+import pdb
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def main():
-    config_path = "config/saved_configs/local_default.json"
+    config_path = "config/saved_configs/milgram_default.json"
 
     if not os.path.exists(config_path):
-        logger.warning(f"Config file not found at: {config_path}")
+        logger.warning("Config file not found at: %s", config_path)
         logger.info("Attempting to generate config automatically...")
         try:
             subprocess.run(["python", "scripts/setup/make_config_file.py"], check=True)
-            logger.info(f"Config generated at {config_path}")
+            logger.info("Config generated at %s", config_path)
         except subprocess.CalledProcessError:
             logger.error("Failed to generate config. Exiting.")
             sys.exit(1)
 
     config = BaseConfig(config_path=config_path)
+
+    pdb.set_trace()
 
     all_positions = []
     all_pupils = []

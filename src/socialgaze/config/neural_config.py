@@ -1,5 +1,6 @@
-# config/neural_params.py
-from config.base_config import BaseConfig
+# src/socialgaze/config/neural_params.py
+
+from socialgaze.config.base_config import BaseConfig
 
 def get_neural_config(base_cfg: BaseConfig) -> dict:
     return {

@@ -1,4 +1,5 @@
-# config/environment.py
+# src/socialgaze/config/environment.py
+
 import os
 import socket
 import getpass

@@ -47,7 +47,6 @@ def process_pupil_file(mat_file, agent: str, session_date: str, run_number: str)
                 "session_name": session_date,
                 "run_number": run_number,
                 "agent": agent,
-                "frame": np.arange(len(data)),
                 "pupil_size": data.flatten()
             })
     return None

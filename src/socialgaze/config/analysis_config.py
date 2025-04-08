@@ -1,6 +1,6 @@
-# config/analysis_params.py
+# src/socialgaze/config/analysis_params.py
 
-from config.base_config import BaseConfig
+from socialgaze.config.base_config import BaseConfig
 
 def get_analysis_config(base_cfg: BaseConfig) -> dict:
     return {
