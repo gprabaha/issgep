@@ -21,13 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    config_path = "config/saved_configs/milgram_default.json"
+    config_path = "src/socialgaze/config/saved_configs/milgram_default.json"
 
     if not os.path.exists(config_path):
         logger.warning("Config file not found at: %s", config_path)
         logger.info("Attempting to generate config automatically...")
         try:
             subprocess.run(["python", "scripts/setup/make_config_file.py"], check=True)
+
             logger.info("Config generated at %s", config_path)
         except subprocess.CalledProcessError:
             logger.error("Failed to generate config. Exiting.")
@@ -35,41 +36,40 @@ def main():
 
     config = BaseConfig(config_path=config_path)
 
-    pdb.set_trace()
-
     all_positions = []
     all_pupils = []
     all_timelines = []
     all_rois = []
 
-    for session_date in config.session_dates:
-        for run_number in config.runs_by_session.get(session_date, []):
+    for session_name in config.session_names:
+        for run_number in config.runs_by_session.get(session_name, []):
             run_number = str(run_number)
-
+            logger.info(f"Getting data for: session: {session_name}, run: {run_number}")
             for agent in ["m1", "m2"]:
-                pos_df = process_position_file(config.get_position_file_path(session_date, run_number),
-                                               agent, session_date, run_number)
+                pos_df = process_position_file(config.get_position_file_path(session_name, run_number),
+                                               agent, session_name, run_number)
                 if pos_df is not None:
                     all_positions.append(pos_df)
 
-                pupil_df = process_pupil_file(config.get_pupil_file_path(session_date, run_number),
-                                              agent, session_date, run_number)
+                pupil_df = process_pupil_file(config.get_pupil_file_path(session_name, run_number),
+                                              agent, session_name, run_number)
                 if pupil_df is not None:
                     all_pupils.append(pupil_df)
 
-                roi_df = process_roi_rects_file(config.get_roi_file_path(session_date, run_number),
-                                                agent, session_date, run_number)
+                roi_df = process_roi_rects_file(config.get_roi_file_path(session_name, run_number),
+                                                agent, session_name, run_number)
                 if roi_df is not None:
                     all_rois.append(roi_df)
 
-            timeline_df = process_time_file(config.get_time_file_path(session_date, run_number),
-                                            session_date, run_number)
+            timeline_df = process_time_file(config.get_time_file_path(session_name, run_number),
+                                            session_name, run_number)
             if timeline_df is not None:
                 all_timelines.append(timeline_df)
 
-    out_dir = config.processed_dir
+    out_dir = config.processed_data_dir
     os.makedirs(out_dir, exist_ok=True)
 
+    logger.info(f"Combining all dataframes together")
     if all_positions:
         pd.concat(all_positions).to_pickle(out_dir / "positions.pkl")
         logger.info(f"Saved positions.pkl to {out_dir}")

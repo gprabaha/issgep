@@ -6,6 +6,9 @@ import numpy as np
 import pandas as pd
 from scipy.io import loadmat
 
+import pdb
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,7 +16,7 @@ def load_mat_from_path(path):
     return loadmat(str(path), simplify_cells=False)
 
 
-def process_position_file(mat_file, agent: str, session_date: str, run_number: str) -> Optional[pd.DataFrame]:
+def process_position_file(mat_file, agent: str, session_name: str, run_number: str) -> Optional[pd.DataFrame]:
     mat_data = load_mat_from_path(mat_file)
     aligned = None
     if 'var' in mat_data:
@@ -24,16 +27,16 @@ def process_position_file(mat_file, agent: str, session_date: str, run_number: s
         data = aligned[agent]
         if data is not None and data.size > 0:
             return pd.DataFrame({
-                "session_name": session_date,
-                "run_number": run_number,
-                "agent": agent,
-                "x": data[:, 0],
-                "y": data[:, 1]
+                "session_name": [session_name],
+                "run_number": [run_number],
+                "agent": [agent],
+                "x": [data[0, :]],
+                "y": [data[1, :]]
             })
     return None
 
 
-def process_pupil_file(mat_file, agent: str, session_date: str, run_number: str) -> Optional[pd.DataFrame]:
+def process_pupil_file(mat_file, agent: str, session_name: str, run_number: str) -> Optional[pd.DataFrame]:
     mat_data = load_mat_from_path(mat_file)
     aligned = None
     if 'var' in mat_data:
@@ -44,28 +47,28 @@ def process_pupil_file(mat_file, agent: str, session_date: str, run_number: str)
         data = aligned[agent]
         if data is not None and data.size > 0:
             return pd.DataFrame({
-                "session_name": session_date,
-                "run_number": run_number,
-                "agent": agent,
-                "pupil_size": data.flatten()
+                "session_name": [session_name],
+                "run_number": [run_number],
+                "agent": [agent],
+                "pupil_size": [data.flatten()]
             })
     return None
 
 
-def process_time_file(mat_file, session_date: str, run_number: str) -> Optional[pd.DataFrame]:
+def process_time_file(mat_file, session_name: str, run_number: str) -> Optional[pd.DataFrame]:
     mat_data = load_mat_from_path(mat_file)
     for key in ['time_file', 'aligned_position_file', 'var']:
         if key in mat_data and 't' in mat_data[key][0][0].dtype.names:
             t = mat_data[key][0][0]['t']
             return pd.DataFrame({
-                "session_name": session_date,
-                "run_number": run_number,
-                "neural_timeline": t.flatten()
+                "session_name": [session_name],
+                "run_number": [run_number],
+                "neural_timeline": [t.flatten()]
             })
     return None
 
 
-def process_roi_rects_file(mat_file, agent: str, session_date: str, run_number: str) -> Optional[pd.DataFrame]:
+def process_roi_rects_file(mat_file, agent: str, session_name: str, run_number: str) -> Optional[pd.DataFrame]:
     mat_data = load_mat_from_path(mat_file)
     if 'roi_rects' in mat_data:
         roi_data = mat_data['roi_rects'][0][0]
@@ -74,14 +77,14 @@ def process_roi_rects_file(mat_file, agent: str, session_date: str, run_number: 
             rows = []
             for roi_name, bbox in roi_dict.items():
                 rows.append({
-                    "session_name": session_date,
+                    "session_name": session_name,
                     "run_number": run_number,
                     "agent": agent,
                     "roi_name": roi_name,
-                    "x": bbox[0],
-                    "y": bbox[1],
-                    "w": bbox[2],
-                    "h": bbox[3],
+                    "x_min": bbox[0],
+                    "y_min": bbox[1],
+                    "x_max": bbox[2],
+                    "y_max": bbox[3],
                 })
             return pd.DataFrame(rows)
     return None

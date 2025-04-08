@@ -25,12 +25,13 @@ class BaseConfig:
         Args:
             config_path (Optional[str]): Path to a saved JSON config file. If provided, config is loaded from this path.
         """
+        
         env = detect_runtime_environment()
         self.is_cluster = env["is_cluster"]
         self.is_grace = env["is_grace"]
         self.prabaha_local = env["prabaha_local"]
 
-        self.project_root = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+        self.project_root = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
         self.processed_data_dir = self.project_root / "data/processed"
         self.output_dir = self.project_root / "outputs"
         self.plots_dir = self.output_dir / "plots"
@@ -42,7 +43,7 @@ class BaseConfig:
         self.roi_dir = self.data_dir / "eyetracking/roi_rects"
         self.file_pattern = "{session_date}_position_{run_number}.mat"
 
-        self.session_dates: List[str] = []
+        self.session_names: List[str] = []
         self.runs_by_session: Dict[str, List[str]] = {}
 
         if config_path:
@@ -126,28 +127,30 @@ class BaseConfig:
         position_files = sorted(self.position_dir.glob("*.mat"))
         session_run_pattern = re.compile(r"(\d{7,8})_position_(\d+)\.mat")
 
-        self.session_dates = []
-        self.runs_by_session = {}
+        session_names = []
+        runs_by_session = {}
 
         for file in position_files:
             match = session_run_pattern.match(file.name)
             if not match:
                 continue
-            session_date, run_number = match.groups()
+            session_name, run_number = match.groups()
 
             required_files = [
-                self.get_time_file_path(session_date, run_number),
-                self.get_pupil_file_path(session_date, run_number),
-                self.get_roi_file_path(session_date, run_number),
+                self.get_time_file_path(session_name, run_number),
+                self.get_pupil_file_path(session_name, run_number),
+                self.get_roi_file_path(session_name, run_number),
             ]
             if all(f.exists() for f in required_files):
-                if session_date not in self.session_dates:
-                    self.session_dates.append(session_date)
-                    self.runs_by_session[session_date] = []
-                self.runs_by_session[session_date].append(run_number)
+                if session_name not in self.session_names:
+                    session_names.append(session_name)
+                    runs_by_session[session_name] = []
+                runs_by_session[session_name].append(run_number)
             else:
                 missing = [f.name for f in required_files if not f.exists()]
-                logger.warning(f"Skipping session {session_date}, run {run_number} — missing files: {missing}")
+                logger.warning(f"Skipping session {session_name}, run {run_number} — missing files: {missing}")
+            self.session_names = session_names
+            self.runs_by_session = runs_by_session
 
     # -----------------------------
     # Save / load
@@ -164,18 +167,17 @@ class BaseConfig:
         with open(config_path, 'w') as f:
             json.dump(self.to_dict(), f, indent=4)
 
-    def load_from_file(self, config_path: str) -> None:
-        """
-        Loads configuration attributes from a JSON file.
 
-        Args:
-            config_path (str): Path to the config JSON file.
-        """
+    def load_from_file(self, config_path: str) -> None:
         with open(config_path, 'r') as f:
             config_data = json.load(f)
+
         for key, value in config_data.items():
-            if hasattr(self, key):
+            if isinstance(value, str) and ("dir" in key or "path" in key):
+                setattr(self, key, Path(value))
+            else:
                 setattr(self, key, value)
+
 
     def to_dict(self) -> Dict[str, Any]:
         """
