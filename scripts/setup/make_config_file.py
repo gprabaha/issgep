@@ -1,0 +1,17 @@
+# scripts/setup/make_config_file.py
+
+from config.base_config import BaseConfig
+import os
+
+def main():
+    config = BaseConfig()
+
+    save_path = "config/saved_configs/local_default.json"
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    config.save_to_file(save_path)
+    print(f"Config saved to {save_path}")
+
+
+if __name__ == "__main__":
+    main()
