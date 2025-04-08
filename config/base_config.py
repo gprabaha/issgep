@@ -3,10 +3,12 @@
 import os
 import json
 import re
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from config.environment import detect_runtime_environment
 
+logger = logging.getLogger(__name__)
 
 class BaseConfig:
     def __init__(self, config_path: Optional[str] = None, params: Optional[Dict[str, Any]] = None):
@@ -107,7 +109,7 @@ class BaseConfig:
                 self.runs_by_session[session_date].append(run_number)
             else:
                 missing = [f.name for f in required_files if not f.exists()]
-                print(f"Skipping session {session_date}, run {run_number} — missing files: {missing}")
+                logger.warning(f"Skipping session {session_date}, run {run_number} — missing files: {missing}")
 
     # -----------------------------
     # Save / load

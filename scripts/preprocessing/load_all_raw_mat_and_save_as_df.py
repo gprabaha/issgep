@@ -1,18 +1,37 @@
 # scripts/preprocessing/load_all_raw_mat_and_save_as_df.py
 
+import os
+import sys
+import subprocess
+import logging
 import pandas as pd
 from config.base_config import BaseConfig
-from src.data.load_mat_files import (
+from src.data.extract_data_from_mat_files import (
     process_position_file,
     process_time_file,
     process_pupil_file,
     process_roi_rects_file,
 )
-import os
+
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def main():
-    config = BaseConfig()
+    config_path = "config/saved_configs/local_default.json"
+
+    if not os.path.exists(config_path):
+        logger.warning(f"Config file not found at: {config_path}")
+        logger.info("Attempting to generate config automatically...")
+        try:
+            subprocess.run(["python", "scripts/setup/make_config_file.py"], check=True)
+            logger.info(f"Config generated at {config_path}")
+        except subprocess.CalledProcessError:
+            logger.error("Failed to generate config. Exiting.")
+            sys.exit(1)
+
+    config = BaseConfig(config_path=config_path)
 
     all_positions = []
     all_pupils = []
@@ -49,12 +68,18 @@ def main():
 
     if all_positions:
         pd.concat(all_positions).to_pickle(out_dir / "positions.pkl")
+        logger.info(f"Saved positions.pkl to {out_dir}")
     if all_pupils:
         pd.concat(all_pupils).to_pickle(out_dir / "pupil.pkl")
+        logger.info(f"Saved pupil.pkl to {out_dir}")
     if all_timelines:
         pd.concat(all_timelines).to_pickle(out_dir / "neural_timeline.pkl")
+        logger.info(f"Saved neural_timeline.pkl to {out_dir}")
     if all_rois:
         pd.concat(all_rois).to_pickle(out_dir / "roi_rects.pkl")
+        logger.info(f"Saved roi_rects.pkl to {out_dir}")
+
+    logger.info("All raw data loaded and saved as DataFrames.")
 
 
 if __name__ == "__main__":
