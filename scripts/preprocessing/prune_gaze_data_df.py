@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 
 from socialgaze.config.base_config import BaseConfig
-from socialgaze.util.loading_utils import load_df_from_pkl
 from socialgaze.utils.config_utils import ensure_config_exists
 
 import pdb
@@ -19,9 +18,7 @@ def main():
 
     config = BaseConfig(config_path=config_path)
 
-    processed_data_dir = Path(config.processed_data_dir)
-    ephys_days_and_monkeys_filepath  = processed_data_dir / "ephys_days_and_monkeys.pkl"
-    ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
+    
 
     behav_data_types = config.behav_data_types
     dataframe_dict = {}
@@ -29,6 +26,8 @@ def main():
         file_path = processed_data_dir / f"{data_type}.pkl"
         dataframe_dict.setdefault(data_type, pd.DataFrame())
         dataframe_dict[data_type] = load_df_from_pkl(file_path)
+    
+    # discard_sessions_without_ephys_data
 
 
 if __name__ == "__main__":

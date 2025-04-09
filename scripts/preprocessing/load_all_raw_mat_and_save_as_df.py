@@ -12,20 +12,20 @@ The configuration specifies:
 """
 
 import os
-import sys
 import logging
-import pandas as pd
 from collections import defaultdict
+import pandas as pd
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.config_utils import ensure_config_exists
+from socialgaze.utils.preprocessing_utils import generate_behav_data_loader_registry
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def collect_all_data(config: BaseConfig) -> dict:
+def collect_all_data(config: BaseConfig, behav_data_loader_registry: dict) -> dict:
     """
     Loads and processes behavioral data for all specified sessions and runs.
 
@@ -40,32 +40,27 @@ def collect_all_data(config: BaseConfig) -> dict:
         A dictionary mapping data type (e.g., 'positions', 'neural_timeline') to a list of pandas DataFrames.
     """
     data_collectors = defaultdict(list)
-
     for session_name in config.session_names:
         for run_number in config.runs_by_session.get(session_name, []):
             run_number = str(run_number)
             logger.info(f"Getting data for: session: {session_name}, run: {run_number}")
-
-            for data_type in config.behav_data_types:
-                registry_entry = config.behav_data_registry[data_type]
+            for data_type, registry_entry in behav_data_loader_registry.items():
                 path_func = registry_entry["path_func"]       # Function to get file path
                 process_func = registry_entry["process_func"] # Function to load/process data
                 agent_specific = registry_entry["agent_specific"]
-
                 if agent_specific:
                     # Separate data loading for each monkey
                     for agent in ["m1", "m2"]:
-                        path = path_func(session_name, run_number)
+                        path = path_func(config, session_name, run_number)
                         df = process_func(path, session_name, run_number, agent)
                         if df is not None:
                             data_collectors[data_type].append(df)
                 else:
                     # Shared data loading (no agent distinction)
-                    path = path_func(session_name, run_number)
+                    path = path_func(config, session_name, run_number)
                     df = process_func(path, session_name, run_number)
                     if df is not None:
                         data_collectors[data_type].append(df)
-
     return data_collectors
 
 
@@ -101,7 +96,8 @@ def main():
     ensure_config_exists(config_path)
     config = BaseConfig(config_path=config_path)
 
-    data_collectors = collect_all_data(config)
+    behav_data_loader_registry = generate_behav_data_loader_registry(config.behav_data_types)
+    data_collectors = collect_all_data(config, behav_data_loader_registry)
     save_loaded_data_as_dataframes(data_collectors, config.processed_data_dir)
 
 
