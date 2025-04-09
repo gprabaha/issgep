@@ -2,6 +2,7 @@
 
 
 from pathlib import Path
+import pandas as pd
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.util.loading_utils import load_df_from_pkl
@@ -23,8 +24,12 @@ def main():
     ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
 
     behav_data_types = config.behav_data_types
-
+    dataframe_dict = {}
     for data_type in behav_data_types:
-        
+        file_path = processed_data_dir / f"{data_type}.pkl"
+        dataframe_dict.setdefault(data_type, pd.DataFrame())
+        dataframe_dict[data_type] = load_df_from_pkl(file_path)
 
 
+if __name__ == "__main__":
+    main()

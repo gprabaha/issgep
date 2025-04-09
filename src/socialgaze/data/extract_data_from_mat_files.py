@@ -1,8 +1,8 @@
 # src/data/extract_data_from_mat_files.py
 
-from typing import Optional, Dict, List
+
+from typing import Optional, Dict
 import logging
-import numpy as np
 import pandas as pd
 from scipy.io import loadmat
 
