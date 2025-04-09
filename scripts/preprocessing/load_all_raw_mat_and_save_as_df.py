@@ -1,36 +1,45 @@
 # scripts/preprocessing/load_all_raw_mat_and_save_as_df.py
 
+"""
+This script loads all raw behavioral data (e.g., eye positions, pupil sizes, ROI bounding box vertices, etc.)
+from .mat files for each session and run listed in the configuration, processes them into pandas DataFrames,
+and saves the concatenated DataFrames for each data type as .pkl files for downstream analysis.
+
+The configuration specifies:
+- which sessions and runs to include,
+- which types of behavioral data to process,
+- how to locate and process each data type.
+"""
+
 import os
 import sys
-import subprocess
 import logging
 import pandas as pd
 from collections import defaultdict
 
 from socialgaze.config.base_config import BaseConfig
+from socialgaze.utils.config_utils import ensure_config_exists
 
-import pdb
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def main():
-    config_path = "src/socialgaze/config/saved_configs/milgram_default.json"
+def collect_all_data(config: BaseConfig) -> dict:
+    """
+    Loads and processes behavioral data for all specified sessions and runs.
 
-    if not os.path.exists(config_path):
-        logger.warning("Config file not found at: %s", config_path)
-        logger.info("Attempting to generate config automatically...")
-        try:
-            subprocess.run(["python", "scripts/setup/make_config_file.py"], check=True)
+    Parameters
+    ----------
+    config : BaseConfig
+        Configuration object containing session/run lists and registry of how to load/process each data type.
 
-            logger.info("Config generated at %s", config_path)
-        except subprocess.CalledProcessError:
-            logger.error("Failed to generate config. Exiting.")
-            sys.exit(1)
-
-    config = BaseConfig(config_path=config_path)
-    data_collectors = defaultdict(list)  # Stores lists of dfs for each behav_data_type
+    Returns
+    -------
+    dict
+        A dictionary mapping data type (e.g., 'positions', 'neural_timeline') to a list of pandas DataFrames.
+    """
+    data_collectors = defaultdict(list)
 
     for session_name in config.session_names:
         for run_number in config.runs_by_session.get(session_name, []):
@@ -39,33 +48,62 @@ def main():
 
             for data_type in config.behav_data_types:
                 registry_entry = config.behav_data_registry[data_type]
-                path_func = registry_entry["path_func"]
-                process_func = registry_entry["process_func"]
+                path_func = registry_entry["path_func"]       # Function to get file path
+                process_func = registry_entry["process_func"] # Function to load/process data
                 agent_specific = registry_entry["agent_specific"]
 
                 if agent_specific:
+                    # Separate data loading for each monkey
                     for agent in ["m1", "m2"]:
                         path = path_func(session_name, run_number)
-                        df = process_func(path, agent, session_name, run_number)
+                        df = process_func(path, session_name, run_number, agent)
                         if df is not None:
                             data_collectors[data_type].append(df)
                 else:
+                    # Shared data loading (no agent distinction)
                     path = path_func(session_name, run_number)
                     df = process_func(path, session_name, run_number)
                     if df is not None:
                         data_collectors[data_type].append(df)
 
-    out_dir = config.processed_data_dir
-    os.makedirs(out_dir, exist_ok=True)
+    return data_collectors
 
-    logger.info(f"Combining all dataframes and saving")
+
+def save_loaded_data_as_dataframes(data_collectors: dict, output_dir):
+    """
+    Combines and saves all collected data as pickle (.pkl) files by data type.
+
+    Parameters
+    ----------
+    data_collectors : dict
+        Dictionary where each key is a data type and the value is a list of pandas DataFrames.
+
+    output_dir : str or Path
+        Directory where the output .pkl files will be saved.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    logger.info("Combining all dataframes and saving")
+
     for data_type, dfs in data_collectors.items():
         if dfs:
-            out_path = out_dir / f"{data_type}.pkl"
+            out_path = output_dir / f"{data_type}.pkl"
             pd.concat(dfs).to_pickle(out_path)
             logger.info(f"Saved {data_type}.pkl to {out_path}")
 
     logger.info("All raw data loaded and saved as DataFrames.")
+
+
+def main():
+    """
+    Main function to load configuration, collect all data, and save results.
+    """
+    config_path = "src/socialgaze/config/saved_configs/milgram_default.json"
+    ensure_config_exists(config_path)
+    config = BaseConfig(config_path=config_path)
+
+    data_collectors = collect_all_data(config)
+    save_loaded_data_as_dataframes(data_collectors, config.processed_data_dir)
+
 
 if __name__ == "__main__":
     main()

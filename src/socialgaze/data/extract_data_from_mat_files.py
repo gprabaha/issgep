@@ -16,7 +16,7 @@ def load_mat_from_path(path):
     return loadmat(str(path), simplify_cells=False)
 
 
-def process_position_file(mat_file, agent: str, session_name: str, run_number: str) -> Optional[pd.DataFrame]:
+def process_position_file(mat_file, session_name: str, run_number: str, agent: str) -> Optional[pd.DataFrame]:
     mat_data = load_mat_from_path(mat_file)
     aligned = None
     if 'var' in mat_data:
@@ -36,7 +36,7 @@ def process_position_file(mat_file, agent: str, session_name: str, run_number: s
     return None
 
 
-def process_pupil_file(mat_file, agent: str, session_name: str, run_number: str) -> Optional[pd.DataFrame]:
+def process_pupil_file(mat_file, session_name: str, run_number: str, agent: str) -> Optional[pd.DataFrame]:
     mat_data = load_mat_from_path(mat_file)
     aligned = None
     if 'var' in mat_data:
@@ -68,7 +68,7 @@ def process_time_file(mat_file, session_name: str, run_number: str) -> Optional[
     return None
 
 
-def process_roi_rects_file(mat_file, agent: str, session_name: str, run_number: str) -> Optional[pd.DataFrame]:
+def process_roi_rects_file(mat_file, session_name: str, run_number: str, agent: str) -> Optional[pd.DataFrame]:
     mat_data = load_mat_from_path(mat_file)
     if 'roi_rects' in mat_data:
         roi_data = mat_data['roi_rects'][0][0]

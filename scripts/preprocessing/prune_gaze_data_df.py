@@ -5,6 +5,7 @@ from pathlib import Path
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.util.loading_utils import load_df_from_pkl
+from socialgaze.utils.config_utils import ensure_config_exists
 
 import pdb
 
@@ -13,17 +14,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     config_path = "src/socialgaze/config/saved_configs/milgram_default.json"
-
-    if not os.path.exists(config_path):
-        logger.warning("Config file not found at: %s", config_path)
-        logger.info("Attempting to generate config automatically...")
-        try:
-            subprocess.run(["python", "scripts/setup/make_config_file.py"], check=True)
-
-            logger.info("Config generated at %s", config_path)
-        except subprocess.CalledProcessError:
-            logger.error("Failed to generate config. Exiting.")
-            sys.exit(1)
+    ensure_config_exists(config_path)
 
     config = BaseConfig(config_path=config_path)
 
@@ -31,10 +22,9 @@ def main():
     ephys_days_and_monkeys_filepath  = processed_data_dir / "ephys_days_and_monkeys.pkl"
     ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
 
-    available_timeseries_data = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
+    behav_data_types = config.behav_data_types
 
-
-
-def 
+    for data_type in behav_data_types:
+        
 
 
