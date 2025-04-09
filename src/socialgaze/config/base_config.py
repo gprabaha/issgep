@@ -82,35 +82,6 @@ class BaseConfig:
             return "/Users/prabaha/data_dir/social_gaze"
         return "../data/raw"
 
-    def get_position_file_path(self, session_date: str, run_number: str) -> Path:
-        """
-        Returns the full path to the position .mat file for a given session and run.
-
-        Args:
-            session_date (str): The date of the session.
-            run_number (str): The run number.
-
-        Returns:
-            Path: Path to the position file.
-        """
-        filename = self.file_pattern.format(session_date=session_date, run_number=run_number)
-        return self.position_dir / filename
-
-    def get_time_file_path(self, session_date: str, run_number: str) -> Path:
-        """Returns the full path to the time .mat file."""
-        filename = self.file_pattern.format(session_date=session_date, run_number=run_number)
-        return self.time_dir / filename
-
-    def get_pupil_file_path(self, session_date: str, run_number: str) -> Path:
-        """Returns the full path to the pupil .mat file."""
-        filename = self.file_pattern.format(session_date=session_date, run_number=run_number)
-        return self.pupil_dir / filename
-
-    def get_roi_file_path(self, session_date: str, run_number: str) -> Path:
-        """Returns the full path to the ROI .mat file."""
-        filename = self.file_pattern.format(session_date=session_date, run_number=run_number)
-        return self.roi_dir / filename
-
 
     # -----------------------------
     # Session / run discovery
@@ -174,6 +145,7 @@ class BaseConfig:
 
         self.session_names = filtered_session_names
         self.runs_by_session = filtered_runs_by_session
+
 
     # -----------------------------
     # Save / load

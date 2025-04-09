@@ -7,6 +7,7 @@ import pandas as pd
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.config_utils import ensure_config_exists
+from socialgaze.utils.loading_utils import load_df_from_pkl
 
 import pdb
 
@@ -21,10 +22,9 @@ def main():
 
     config = BaseConfig(config_path=config_path)
 
-    behav_data_types = config.behav_data_types
     dataframe_dict = {}
-    for data_type in behav_data_types:
-        file_path = processed_data_dir / f"{data_type}.pkl"
+    for data_type in config.behav_data_types:
+        file_path = config.processed_data_dir / f"{data_type}.pkl"
         dataframe_dict.setdefault(data_type, pd.DataFrame())
         dataframe_dict[data_type] = load_df_from_pkl(file_path)
     
