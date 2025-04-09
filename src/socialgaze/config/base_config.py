@@ -9,12 +9,6 @@ from typing import Dict, Any, Optional, List
 import pandas as pd
 
 from socialgaze.config.environment import detect_runtime_environment
-from socialgaze.data.extract_data_from_mat_files import (
-    process_position_file,
-    process_time_file,
-    process_pupil_file,
-    process_roi_rects_file
-)
 from socialgaze.utils.loading_utils import load_df_from_pkl
 
 
@@ -185,6 +179,20 @@ class BaseConfig:
     # -----------------------------
     # Save / load
     # -----------------------------
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Returns a dictionary representation of the config object for serialization.
+
+        Returns:
+            Dict[str, Any]: Dictionary with config values.
+        """
+        return {
+            key: str(value) if isinstance(value, Path) else value
+            for key, value in self.__dict__.items()
+            if not key.startswith('_')
+        }
+
 
     def save_to_file(self, config_path: str) -> None:
         """
@@ -208,16 +216,3 @@ class BaseConfig:
             else:
                 setattr(self, key, value)
 
-
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        Returns a dictionary representation of the config object for serialization.
-
-        Returns:
-            Dict[str, Any]: Dictionary with config values.
-        """
-        return {
-            key: str(value) if isinstance(value, Path) else value
-            for key, value in self.__dict__.items()
-            if not key.startswith('_')
-        }

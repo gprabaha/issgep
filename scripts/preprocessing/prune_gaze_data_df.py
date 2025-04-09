@@ -2,6 +2,7 @@
 
 
 from pathlib import Path
+import logging
 import pandas as pd
 
 from socialgaze.config.base_config import BaseConfig
@@ -17,8 +18,6 @@ def main():
     ensure_config_exists(config_path)
 
     config = BaseConfig(config_path=config_path)
-
-    
 
     behav_data_types = config.behav_data_types
     dataframe_dict = {}
