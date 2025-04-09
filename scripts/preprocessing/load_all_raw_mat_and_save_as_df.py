@@ -5,14 +5,9 @@ import sys
 import subprocess
 import logging
 import pandas as pd
+from collections import defaultdict
 
 from socialgaze.config.base_config import BaseConfig
-from socialgaze.data.extract_data_from_mat_files import (
-    process_position_file,
-    process_time_file,
-    process_pupil_file,
-    process_roi_rects_file,
-)
 
 import pdb
 
@@ -35,56 +30,42 @@ def main():
             sys.exit(1)
 
     config = BaseConfig(config_path=config_path)
-
-    all_positions = []
-    all_pupils = []
-    all_timelines = []
-    all_rois = []
+    data_collectors = defaultdict(list)  # Stores lists of dfs for each behav_data_type
 
     for session_name in config.session_names:
         for run_number in config.runs_by_session.get(session_name, []):
             run_number = str(run_number)
             logger.info(f"Getting data for: session: {session_name}, run: {run_number}")
-            for agent in ["m1", "m2"]:
-                pos_df = process_position_file(config.get_position_file_path(session_name, run_number),
-                                               agent, session_name, run_number)
-                if pos_df is not None:
-                    all_positions.append(pos_df)
 
-                pupil_df = process_pupil_file(config.get_pupil_file_path(session_name, run_number),
-                                              agent, session_name, run_number)
-                if pupil_df is not None:
-                    all_pupils.append(pupil_df)
+            for data_type in config.behav_data_types:
+                registry_entry = config.behav_data_registry[data_type]
+                path_func = registry_entry["path_func"]
+                process_func = registry_entry["process_func"]
+                agent_specific = registry_entry["agent_specific"]
 
-                roi_df = process_roi_rects_file(config.get_roi_file_path(session_name, run_number),
-                                                agent, session_name, run_number)
-                if roi_df is not None:
-                    all_rois.append(roi_df)
-
-            timeline_df = process_time_file(config.get_time_file_path(session_name, run_number),
-                                            session_name, run_number)
-            if timeline_df is not None:
-                all_timelines.append(timeline_df)
+                if agent_specific:
+                    for agent in ["m1", "m2"]:
+                        path = path_func(session_name, run_number)
+                        df = process_func(path, agent, session_name, run_number)
+                        if df is not None:
+                            data_collectors[data_type].append(df)
+                else:
+                    path = path_func(session_name, run_number)
+                    df = process_func(path, session_name, run_number)
+                    if df is not None:
+                        data_collectors[data_type].append(df)
 
     out_dir = config.processed_data_dir
     os.makedirs(out_dir, exist_ok=True)
 
-    logger.info(f"Combining all dataframes together")
-    if all_positions:
-        pd.concat(all_positions).to_pickle(out_dir / "positions.pkl")
-        logger.info(f"Saved positions.pkl to {out_dir}")
-    if all_pupils:
-        pd.concat(all_pupils).to_pickle(out_dir / "pupil.pkl")
-        logger.info(f"Saved pupil.pkl to {out_dir}")
-    if all_timelines:
-        pd.concat(all_timelines).to_pickle(out_dir / "neural_timeline.pkl")
-        logger.info(f"Saved neural_timeline.pkl to {out_dir}")
-    if all_rois:
-        pd.concat(all_rois).to_pickle(out_dir / "roi_rects.pkl")
-        logger.info(f"Saved roi_rects.pkl to {out_dir}")
+    logger.info(f"Combining all dataframes and saving")
+    for data_type, dfs in data_collectors.items():
+        if dfs:
+            out_path = out_dir / f"{data_type}.pkl"
+            pd.concat(dfs).to_pickle(out_path)
+            logger.info(f"Saved {data_type}.pkl to {out_path}")
 
     logger.info("All raw data loaded and saved as DataFrames.")
-
 
 if __name__ == "__main__":
     main()

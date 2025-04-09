@@ -6,7 +6,14 @@ import re
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+
 from socialgaze.config.environment import detect_runtime_environment
+from socialgaze.data.extract_data_from_mat_files import (
+    process_position_file,
+    process_time_file,
+    process_pupil_file,
+    process_roi_rects_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +42,31 @@ class BaseConfig:
         self.processed_data_dir = self.project_root / "data/processed"
         self.output_dir = self.project_root / "outputs"
         self.plots_dir = self.output_dir / "plots"
+
+        self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
+        
+        self.behav_data_registry = {
+            "positions": {
+                "path_func": self.get_position_file_path,
+                "process_func": process_position_file,
+                "agent_specific": True
+            },
+            "pupil": {
+                "path_func": self.get_pupil_file_path,
+                "process_func": process_pupil_file,
+                "agent_specific": True
+            },
+            "roi_vertices": {
+                "path_func": self.get_roi_file_path,
+                "process_func": process_roi_rects_file,
+                "agent_specific": True
+            },
+            "neural_timeline": {
+                "path_func": self.get_time_file_path,
+                "process_func": process_time_file,
+                "agent_specific": False
+            }
+        }
 
         self.data_dir = Path(self.determine_root_data_dir())
         self.position_dir = self.data_dir / "eyetracking/aligned_raw_samples/position"
