@@ -76,6 +76,8 @@ def process_roi_rects_file(mat_file, session_name: str, run_number: str, agent: 
             roi_dict = extract_roi_dict(roi_data[agent])
             rows = []
             for roi_name, bbox in roi_dict.items():
+                if agent == 'm2' and 'object' in roi_name.lower():
+                    continue
                 rows.append({
                     "session_name": session_name,
                     "run_number": run_number,
