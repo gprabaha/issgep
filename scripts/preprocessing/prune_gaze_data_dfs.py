@@ -1,4 +1,4 @@
-# scripts/preprocessing/prune_gaze_data_df.py
+# scripts/preprocessing/prune_gaze_data_dfs.py
 
 
 from pathlib import Path
@@ -26,7 +26,9 @@ def main():
         dataframe_dict.setdefault(data_type, pd.DataFrame())
         dataframe_dict[data_type] = load_df_from_pkl(file_path)
     
-    # discard_sessions_without_ephys_data
+    # remove starting and training NaNs from M1 and M2's position data and remove teh corresponding indices from pupil and timeline
+    
+    # use non-linear interpolation to fill in cases with sparse NaNs in the data
 
 
 if __name__ == "__main__":

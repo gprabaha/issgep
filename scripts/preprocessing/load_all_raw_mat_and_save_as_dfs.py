@@ -1,4 +1,4 @@
-# scripts/preprocessing/load_all_raw_mat_and_save_as_df.py
+# scripts/preprocessing/load_all_raw_mat_and_save_as_dfs.py
 
 """
 This script loads all raw behavioral data (e.g., eye positions, pupil sizes, ROI bounding box vertices, etc.)
