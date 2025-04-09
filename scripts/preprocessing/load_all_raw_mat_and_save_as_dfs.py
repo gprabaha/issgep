@@ -7,8 +7,7 @@ and saves the concatenated DataFrames for each data type as .pkl files for downs
 
 The configuration specifies:
 - which sessions and runs to include,
-- which types of behavioral data to process,
-- how to locate and process each data type.
+- which types of behavioral data to process.
 """
 
 import os
@@ -78,13 +77,11 @@ def save_loaded_data_as_dataframes(data_collectors: dict, output_dir):
     """
     os.makedirs(output_dir, exist_ok=True)
     logger.info("Combining all dataframes and saving")
-
     for data_type, dfs in data_collectors.items():
         if dfs:
             out_path = output_dir / f"{data_type}.pkl"
             pd.concat(dfs).to_pickle(out_path)
             logger.info(f"Saved {data_type}.pkl to {out_path}")
-
     logger.info("All raw data loaded and saved as DataFrames.")
 
 

@@ -60,8 +60,7 @@ class BaseConfig:
         else:
             self.initialize_sessions_and_runs()
             ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
-            ephys_days_and_monkeys_dict = load_df_from_pkl(ephys_days_and_monkeys_filepath)
-            ephys_days_and_monkeys_df = pd.DataFrame(ephys_days_and_monkeys_dict)
+            ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
             self.filter_sessions_without_ephys_data(ephys_days_and_monkeys_df)
 
 

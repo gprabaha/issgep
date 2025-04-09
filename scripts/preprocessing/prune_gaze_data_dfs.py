@@ -10,8 +10,10 @@ from socialgaze.utils.config_utils import ensure_config_exists
 
 import pdb
 
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def main():
     config_path = "src/socialgaze/config/saved_configs/milgram_default.json"
@@ -26,7 +28,7 @@ def main():
         dataframe_dict.setdefault(data_type, pd.DataFrame())
         dataframe_dict[data_type] = load_df_from_pkl(file_path)
     
-    # remove starting and training NaNs from M1 and M2's position data and remove teh corresponding indices from pupil and timeline
+    # remove starting and trailing NaNs from M1 and M2's position data and remove the corresponding indices from pupil and timeline
     
     # use non-linear interpolation to fill in cases with sparse NaNs in the data
 
