@@ -2,16 +2,17 @@
 
 
 import re
-from typing import List, Dict, Tuple, Callable
+from typing import List, Dict, Tuple, Callable, Any
 from pathlib import Path
 import logging
 
+import pdb
 
 logger = logging.getLogger(__name__)
 
 
 def find_valid_sessions(
-    position_dir: Path,
+    config: Any,
     path_fns: Dict[str, Callable[[str, str], Path]]
 ) -> Tuple[List[str], Dict[str, List[str]]]:
     """
@@ -26,7 +27,7 @@ def find_valid_sessions(
     Returns:
         Tuple[List[str], Dict[str, List[str]]]: Valid session names and their corresponding runs.
     """
-    position_files = sorted(position_dir.glob("*.mat"))
+    position_files = sorted(config.position_dir.glob("*.mat"))
     session_run_pattern = re.compile(r"(\d{7,8})_position_(\d+)\.mat")
 
     session_names: List[str] = []
@@ -39,7 +40,7 @@ def find_valid_sessions(
 
         session_name, run_number = match.groups()
 
-        required_paths = [path_fn(session_name, run_number) for path_fn in path_fns.values()]
+        required_paths = [path_fn(config, session_name, run_number) for path_fn in path_fns.values()]
         if all(f.exists() for f in required_paths):
             if session_name not in session_names:
                 session_names.append(session_name)

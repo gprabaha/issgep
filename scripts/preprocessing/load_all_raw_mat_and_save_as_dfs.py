@@ -17,7 +17,7 @@ import pandas as pd
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.config_utils import ensure_config_exists
-from socialgaze.utils.preprocessing_utils import generate_behav_data_loader_registry
+from socialgaze.data.extract_data_from_mat_files import generate_behav_data_loader_dict
 
 
 logging.basicConfig(level=logging.INFO)
@@ -93,7 +93,7 @@ def main():
     ensure_config_exists(config_path)
     config = BaseConfig(config_path=config_path)
 
-    behav_data_loader_registry = generate_behav_data_loader_registry(config.behav_data_types)
+    behav_data_loader_registry = generate_behav_data_loader_dict(config.behav_data_types)
     data_collectors = collect_all_data(config, behav_data_loader_registry)
     save_loaded_data_as_dataframes(data_collectors, config.processed_data_dir)
 
