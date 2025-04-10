@@ -3,10 +3,18 @@
 
 from pathlib import Path
 import pdb
-from socialgaze.config.base_config import BaseConfig
 
 
-def get_position_file_path(config: BaseConfig, session_date: str, run_number: str) -> Path:
+def determine_root_data_dir(is_cluster: bool, is_grace: bool, prabaha_local: bool) -> str:
+    if is_cluster:
+        return "/gpfs/gibbs/project/chang/pg496/data_dir/social_gaze/" if is_grace \
+            else "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/"
+    if prabaha_local:
+        return "/Users/prabaha/data_dir/social_gaze"
+    return "../data/raw"
+
+
+def get_position_file_path(config, session_date: str, run_number: str) -> Path:
     """
     Returns the full path to the position .mat file for a given session and run.
     """
@@ -14,7 +22,7 @@ def get_position_file_path(config: BaseConfig, session_date: str, run_number: st
     return Path(config.position_dir) / filename
 
 
-def get_time_file_path(config: BaseConfig, session_date: str, run_number: str) -> Path:
+def get_time_file_path(config, session_date: str, run_number: str) -> Path:
     """
     Returns the full path to the time .mat file for a given session and run.
     """
@@ -22,7 +30,7 @@ def get_time_file_path(config: BaseConfig, session_date: str, run_number: str) -
     return Path(config.time_dir) / filename
 
 
-def get_pupil_file_path(config: BaseConfig, session_date: str, run_number: str) -> Path:
+def get_pupil_file_path(config, session_date: str, run_number: str) -> Path:
     """
     Returns the full path to the pupil .mat file for a given session and run.
     """
@@ -30,7 +38,7 @@ def get_pupil_file_path(config: BaseConfig, session_date: str, run_number: str) 
     return Path(config.pupil_dir) / filename
 
 
-def get_roi_file_path(config: BaseConfig, session_date: str, run_number: str) -> Path:
+def get_roi_file_path(config, session_date: str, run_number: str) -> Path:
     """
     Returns the full path to the ROI .mat file for a given session and run.
     """

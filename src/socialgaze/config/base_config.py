@@ -9,7 +9,14 @@ from typing import Dict, Any, Optional, List
 import pandas as pd
 
 from socialgaze.config.environment import detect_runtime_environment
+from socialgaze.utils.discovery_utils import find_valid_sessions, filter_sessions_with_ephys
 from socialgaze.utils.loading_utils import load_df_from_pkl
+from socialgaze.utils.path_utils import (
+    determine_root_data_dir,
+    get_pupil_file_path,
+    get_roi_file_path,
+    get_time_file_path
+)
 
 
 import pdb
@@ -45,7 +52,11 @@ class BaseConfig:
 
         self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
 
-        self.data_dir = Path(self.determine_root_data_dir())
+        self.data_dir = Path(determine_root_data_dir(
+            is_cluster=self.is_cluster,
+            is_grace=self.is_grace,
+            prabaha_local=self.prabaha_local
+        ))
         self.position_dir = self.data_dir / "eyetracking/aligned_raw_samples/position"
         self.time_dir = self.data_dir / "eyetracking/aligned_raw_samples/time"
         self.pupil_dir = self.data_dir / "eyetracking/aligned_raw_samples/pupil_size"
@@ -61,7 +72,7 @@ class BaseConfig:
             self.initialize_sessions_and_runs()
             ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
             ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
-            self.filter_sessions_without_ephys_data(ephys_days_and_monkeys_df)
+            self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
 
 
     # -----------------------------
@@ -88,64 +99,19 @@ class BaseConfig:
     # -----------------------------
 
     def initialize_sessions_and_runs(self) -> None:
-        """
-        Scans the position directory and automatically detects available session dates
-        and their corresponding run numbers. A session/run pair is only included if
-        all required .mat files (time, pupil, ROI) are found.
-        """
-        position_files = sorted(self.position_dir.glob("*.mat"))
-        session_run_pattern = re.compile(r"(\d{7,8})_position_(\d+)\.mat")
+        self.session_names, self.runs_by_session = find_valid_sessions(
+            self.position_dir, path_fns={
+                'time': get_time_file_path,
+                'pupil': get_pupil_file_path,
+                'roi': get_roi_file_path,
+            }
+        )
 
-        session_names = []
-        runs_by_session = {}
-
-        for file in position_files:
-            match = session_run_pattern.match(file.name)
-            if not match:
-                continue
-            session_name, run_number = match.groups()
-
-            required_files = [
-                self.get_time_file_path(session_name, run_number),
-                self.get_pupil_file_path(session_name, run_number),
-                self.get_roi_file_path(session_name, run_number),
-            ]
-            if all(f.exists() for f in required_files):
-                if session_name not in self.session_names:
-                    session_names.append(session_name)
-                    runs_by_session[session_name] = []
-                runs_by_session[session_name].append(run_number)
-            else:
-                missing = [f.name for f in required_files if not f.exists()]
-                logger.warning(f"Skipping session {session_name}, run {run_number} — missing files: {missing}")
-            self.session_names = session_names
-            self.runs_by_session = runs_by_session
-
-
-    def filter_sessions_without_ephys_data(self, ephys_days_and_monkeys_df: pd.DataFrame) -> None:
-        """
-        Filters out sessions from self.session_names and self.runs_by_session that do not have
-        corresponding ephys data (i.e., not present in ephys_days_and_monkeys_df['session_name']).
-
-        Args:
-            ephys_days_and_monkeys_df (pd.DataFrame): DataFrame containing valid session names
-                with available electrophysiology recordings.
-        """
-        valid_ephys_sessions = set(ephys_days_and_monkeys_df['session_name'].astype(str))
-
-        filtered_session_names = []
-        filtered_runs_by_session = {}
-
-        for session_name in self.session_names:
-            if session_name in valid_ephys_sessions:
-                filtered_session_names.append(session_name)
-                filtered_runs_by_session[session_name] = self.runs_by_session[session_name]
-            else:
-                logger.info(f"Discarding session {session_name} from base_config — no corresponding ephys data found.")
-
-        self.session_names = filtered_session_names
-        self.runs_by_session = filtered_runs_by_session
-
+    def extract_sessions_with_ephys_data(self, ephys_days_and_monkeys_df: pd.DataFrame) -> None:
+        self.session_names, self.runs_by_session = filter_sessions_with_ephys(
+            self.session_names, self.runs_by_session, ephys_days_and_monkeys_df
+        )
+    
 
     # -----------------------------
     # Save / load
