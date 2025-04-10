@@ -43,9 +43,15 @@ class BaseConfig:
         self.is_cluster = env["is_cluster"]
         self.is_grace = env["is_grace"]
         self.prabaha_local = env["prabaha_local"]
+       
 
         # Set core project directories
         self.project_root = Path(__file__).resolve().parents[3]
+
+        self.config_folder = self.project_root / "src/socialgaze/config/saved_config/"
+        self.filename = self.get_config_filename()
+        self.config_path = self.config_folder / self.filename
+
         self.processed_data_dir = self.project_root / "data/processed"
         self.output_dir = self.project_root / "outputs"
         self.plots_dir = self.output_dir / "plots"
@@ -78,10 +84,22 @@ class BaseConfig:
             ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
             ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
             self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
+            self.save_to_file(self.config_path)
+            logger.info(f"base_config generated and saved to {self.config_path}")
 
     # -----------------------------
     # Session / run discovery
     # -----------------------------
+
+    def get_config_filename(self) -> str:
+        if self.is_cluster: 
+            if self.is_grace:
+                return "grace_config.json"
+            else:
+                return "milgram_config.json"
+        else:
+            return "local_config.json"
+
 
     def initialize_sessions_and_runs(self) -> None:
         """

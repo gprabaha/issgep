@@ -15,8 +15,8 @@ import logging
 from collections import defaultdict
 import pandas as pd
 
-from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.config_utils import ensure_config_exists
+from socialgaze.config.base_config import BaseConfig
 from socialgaze.data.extract_data_from_mat_files import generate_behav_data_loader_dict
 
 
