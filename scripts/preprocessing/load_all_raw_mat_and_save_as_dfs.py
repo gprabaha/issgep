@@ -15,7 +15,6 @@ import logging
 from collections import defaultdict
 import pandas as pd
 
-from socialgaze.utils.config_utils import ensure_config_exists
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.data.extract_data_from_mat_files import generate_behav_data_loader_dict
 
@@ -89,9 +88,7 @@ def main():
     """
     Main function to load configuration, collect all data, and save results.
     """
-    config_path = "src/socialgaze/config/saved_configs/milgram_default.json"
-    ensure_config_exists(config_path)
-    config = BaseConfig(config_path=config_path)
+    config = BaseConfig()
 
     behav_data_loader_registry = generate_behav_data_loader_dict(config.behav_data_types)
     data_collectors = collect_all_data(config, behav_data_loader_registry)
