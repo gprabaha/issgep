@@ -40,10 +40,7 @@ class BaseConfig:
         """
 
         # Detect runtime environment
-        env = self.detect_runtime_environment()
-        self.is_cluster = env["is_cluster"]
-        self.is_grace = env["is_grace"]
-        self.prabaha_local = env["prabaha_local"]
+        self.detect_runtime_environment()
 
         # Set core project directories
         self.project_root = Path(__file__).resolve().parents[3]
@@ -96,20 +93,27 @@ class BaseConfig:
     # Config environment
     # -----------------------------
 
-    def detect_runtime_environment(self) -> dict:
-        """Auto-detect runtime environment based on hostname or filesystem."""
+    def detect_runtime_environment(self) -> None:
+        """Auto-detect runtime environment and assign flags as instance attributes."""
         hostname = socket.gethostname().lower()
         username = getpass.getuser()
 
         if "grace" in hostname or os.path.exists("/gpfs/gibbs/"):
-            return {"is_cluster": True, "is_grace": True, "prabaha_local": False}
+            self.is_cluster = True
+            self.is_grace = True
+            self.prabaha_local = False
         elif "milgram" in hostname or os.path.exists("/gpfs/milgram/"):
-            return {"is_cluster": True, "is_grace": False, "prabaha_local": False}
+            self.is_cluster = True
+            self.is_grace = False
+            self.prabaha_local = False
         elif username == "prabaha":
-            return {"is_cluster": False, "is_grace": False, "prabaha_local": True}
+            self.is_cluster = False
+            self.is_grace = False
+            self.prabaha_local = True
         else:
-            return {"is_cluster": False, "is_grace": False, "prabaha_local": False}
-
+            self.is_cluster = False
+            self.is_grace = False
+            self.prabaha_local = False
 
 
     # -----------------------------
