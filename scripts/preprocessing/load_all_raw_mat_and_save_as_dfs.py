@@ -10,9 +10,15 @@ The configuration specifies:
 - which types of behavioral data to process.
 """
 
+import logging
+
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.analysis.gaze_data import GazeData
 
+import pdb
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def main():
     config = BaseConfig()
@@ -23,3 +29,6 @@ def main():
 
     # Save everything
     gaze_data.save_as_dataframes(config.processed_data_dir)
+
+if __name__ == "__main__":
+    main()

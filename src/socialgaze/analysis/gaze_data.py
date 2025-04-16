@@ -1,3 +1,5 @@
+# src/socialgaze/analysis/gaze_data.py
+
 import os
 import logging
 import pandas as pd
@@ -175,7 +177,7 @@ class GazeData:
             path_func = registry_entry["path_func"]
             process_func = registry_entry["process_func"]
             agent_specific = registry_entry["agent_specific"]
-
+            logger.info(f"Loading .mat data for: {data_type}")
             for session_name in self.config.session_names:
                 if session_filter and session_name not in session_filter:
                     continue
