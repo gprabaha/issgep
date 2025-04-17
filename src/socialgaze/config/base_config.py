@@ -52,6 +52,7 @@ class BaseConfig:
 
         If a saved config exists at the provided path, it loads it.
         Otherwise, it auto-detects the environment, sets up paths, and scans for valid sessions/runs.
+        On non-cluster environments, raw data paths and scanning are skipped.
 
         Args:
             config_path (Optional[str]): Optional path to an existing saved config file.
@@ -65,6 +66,13 @@ class BaseConfig:
         # Determine config save path
         self.config_path = Path(config_path) if config_path else join_folder_and_filename(self.config_folder, self.filename)
 
+        # Core processed output paths (these are safe to set in any environment)
+        paths = get_default_data_paths(self.project_root)
+        self.processed_data_dir = paths["processed"]
+        self.output_dir = paths["outputs"]
+        self.plots_dir = paths["plots"]
+
+        self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
         self.session_names: List[str] = []
         self.runs_by_session: Dict[str, List[str]] = {}
 
@@ -74,36 +82,31 @@ class BaseConfig:
             self.load_from_file(self.config_path)
         else:
             logger.info(f"No config found at {self.config_path}. Generating new config.")
-            # Core data/output paths
-            paths = get_default_data_paths(self.project_root)
-            self.processed_data_dir = paths["processed"]
-            self.output_dir = paths["outputs"]
-            self.plots_dir = paths["plots"]
 
-            self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
+            if self.is_cluster:
+                # Only define and validate raw data paths if on a cluster
+                self.data_dir = determine_root_data_dir(
+                    is_cluster=self.is_cluster,
+                    is_grace=self.is_grace,
+                    prabaha_local=self.prabaha_local
+                )
+                raw_dirs = get_raw_data_directories(self.data_dir)
+                self.position_dir = raw_dirs["position"]
+                self.time_dir = raw_dirs["time"]
+                self.pupil_dir = raw_dirs["pupil"]
+                self.roi_dir = raw_dirs["roi"]
 
-            # Raw data root and subfolders
-            self.data_dir = determine_root_data_dir(
-                is_cluster=self.is_cluster,
-                is_grace=self.is_grace,
-                prabaha_local=self.prabaha_local
-            )
-            raw_dirs = get_raw_data_directories(self.data_dir)
-            self.position_dir = raw_dirs["position"]
-            self.time_dir = raw_dirs["time"]
-            self.pupil_dir = raw_dirs["pupil"]
-            self.roi_dir = raw_dirs["roi"]
+                self.file_pattern = get_mat_filename_pattern()
+                self.initialize_sessions_and_runs()
 
-            self.file_pattern = get_mat_filename_pattern()
-            self.initialize_sessions_and_runs()
+                ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
+                ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
 
-            ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
-            ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
+                self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
 
-            self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
             self.save_to_file(self.config_path)
-
             logger.info(f"Base config generated and saved to {self.config_path}")
+
 
     # -----------------------------
     # Config environment

@@ -10,7 +10,7 @@ Preprocesses all raw behavioral data by:
 
 import logging
 from socialgaze.config.base_config import BaseConfig
-from socialgaze.analysis.gaze_data import GazeData
+from socialgaze.data.gaze_data import GazeData
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

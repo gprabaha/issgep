@@ -20,6 +20,8 @@ from socialgaze.utils.path_utils import (
 from socialgaze.utils.saving_utils import save_df_to_pkl
 from socialgaze.utils.loading_utils import load_df_from_pkl, load_mat_from_path
 
+import pdb
+
 logger = logging.getLogger(__name__)
 
 
@@ -158,7 +160,7 @@ class GazeData:
             if pkl_path.exists():
                 try:
                     df = load_df_from_pkl(pkl_path)
-                    self.raw_data[data_type] = [df]
+                    self.raw_data[data_type] = df
                     logger.info(f"Loaded {data_type} from {pkl_path}")
                 except Exception as e:
                     logger.warning(f"Failed to load {data_type} from disk: {e}")
@@ -236,7 +238,6 @@ class GazeData:
             df = df[df["run_number"] == run_number]
         if agent is not None and "agent" in df.columns:
             df = df[df["agent"] == agent]
-
         return df if not df.empty else None
 
 

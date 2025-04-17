@@ -3,6 +3,9 @@
 from pathlib import Path
 from typing import Dict, Optional, List, Union
 
+# --------------
+# Config
+# --------------
 
 def determine_root_data_dir(is_cluster: bool, is_grace: bool, prabaha_local: bool) -> str:
     """
@@ -25,9 +28,6 @@ def determine_root_data_dir(is_cluster: bool, is_grace: bool, prabaha_local: boo
     if prabaha_local:
         return Path("/Users/prabaha/data_dir/social_gaze")
     return Path("../data/raw")
-
-
-# Config
 
 def get_project_root() -> Path:
     """
@@ -157,7 +157,9 @@ def get_roi_file_path(config, session_date: str, run_number: str) -> Path:
     filename = config.file_pattern.format(session_date=session_date, run_number=run_number)
     return config.roi_dir / filename
 
+# --------------
 # General
+# --------------
 
 def join_folder_and_filename(folder: Union[str, Path], filename: str) -> Path:
     """

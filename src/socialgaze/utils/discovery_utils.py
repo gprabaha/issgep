@@ -1,12 +1,9 @@
 # src/socialgaze/utils/discovery_utils.py
 
-
 import re
 from typing import List, Dict, Tuple, Callable, Any
 from pathlib import Path
 import logging
-
-import pdb
 
 logger = logging.getLogger(__name__)
 
