@@ -11,6 +11,20 @@ import pdb
 logger = logging.getLogger(__name__)
 
 
+def get_mat_filename_pattern():
+    """
+    Returns the standardized filename pattern used for .mat files
+    containing aligned raw gaze position data.
+
+    The returned string can be formatted with `session_date` and `run_number`
+    to generate full filenames (e.g., "20240315_position_3.mat").
+
+    Returns:
+        str: Filename pattern string with placeholders.
+    """
+    return "{session_date}_position_{run_number}.mat"
+
+
 def find_valid_sessions(
     config: Any,
     path_fns: Dict[str, Callable[[str, str], Path]]
