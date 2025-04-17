@@ -20,4 +20,3 @@ class FixationConfig(BaseConfig):
         self.cpus_per_task: int = 16
         self.mem_per_cpu: int = 1000  # in MB
         self.time_limit: str = "01:00:00"
-        self.mail_type: str = "FAIL"

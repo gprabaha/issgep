@@ -47,26 +47,24 @@ class FixationDetector:
         jobs_dir = output_dir / "jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
 
-        job_file = jobs_dir / fixation_config.job_file_name
+        job_file_path = jobs_dir / fixation_config.job_file_name
         script_path = fixation_config.job_script_path
 
         generate_fixation_job_file(
             tasks=tasks,
-            job_file=job_file,
+            job_file_path=job_file_path,
             script_path=script_path,
-            is_grace=self.config.is_grace,
-            env_name=fixation_config.env_name
+            is_grace=self.config.is_grace
         )
 
         job_id = submit_dsq_array_job(
-            job_file_path=job_file,
+            job_file_path=job_file_path,
             job_out_dir=jobs_dir,
             job_name=fixation_config.job_name,
             partition=fixation_config.partition,
-            cpus_per_task=fixation_config.cpus_per_task,
+            cpus=fixation_config.cpus_per_task,
             mem_per_cpu=fixation_config.mem_per_cpu,
-            time_limit=fixation_config.time_limit,
-            mail_type=fixation_config.mail_type
+            time_limit=fixation_config.time_limit
         )
 
         track_job_completion(job_id)
@@ -112,14 +110,11 @@ class FixationDetector:
         if pos_df is None:
             logger.warning("No position data found for given run.")
             return
-
         x = np.array(pos_df["x"].values[0])
         y = np.array(pos_df["y"].values[0])
         positions = np.stack([x, y], axis=1)
-
         non_nan_chunks, chunk_start_indices = _extract_non_nan_chunks(positions)
         args = [(chunk, start) for chunk, start in zip(non_nan_chunks, chunk_start_indices)]
-
         if config.use_parallel:
             logger.info("Detecting fixations and saccads for chunks in parallel")
             num_cpus = getattr(config, "num_cpus", 1)
@@ -128,21 +123,16 @@ class FixationDetector:
         else:
             logger.info("Detecting fixations and saccads for chunks in serial")
             results = [_detect_fix_sacc_in_chunk(arg) for arg in args]
-
         all_fix_start_stops = np.concatenate([r[0] for r in results], axis=0)
         all_sacc_start_stops = np.concatenate([r[1] for r in results], axis=0)
-
         all_events = np.vstack((all_fix_start_stops, all_sacc_start_stops))
         all_events = all_events[np.argsort(all_events[:, 0])]
         for i in range(len(all_events) - 1):
             assert all_events[i][1] < all_events[i + 1][0], f"Overlap detected between {all_events[i]} and {all_events[i+1]}"
-
         temp_dir = Path(self.config.processed_data_dir) / "temp"
         temp_dir.mkdir(parents=True, exist_ok=True)
-
         fixation_df = _build_event_df(all_fix_start_stops, session_name, run_number, agent)
         saccade_df = _build_event_df(all_sacc_start_stops, session_name, run_number, agent)
-
         save_df_to_pkl(fixation_df, temp_dir / f"fixations_{session_name}_{run_number}_{agent}.pkl")
         save_df_to_pkl(saccade_df, temp_dir / f"saccades_{session_name}_{run_number}_{agent}.pkl")
 
