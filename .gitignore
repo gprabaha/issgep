@@ -29,6 +29,10 @@ env/
 .DS_Store
 Thumbs.db
 
+# Jobs
+*.err
+*.out
+
 # Project specific
 data/raw/*
 !data/raw/.gitkeep
