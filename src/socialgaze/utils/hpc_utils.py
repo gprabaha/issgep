@@ -31,13 +31,14 @@ def submit_dsq_array_job(job_file_path: Path, job_out_dir: Path, job_name: str =
     """
     Submit a DSQ job array and return the job ID.
     """
-    job_script_path = job_out_dir / f'dsq-joblist_{job_name}.sh'
+    job_script_path = job_out_dir / "scripts" / f'dsq-joblist_{job_name}.sh'
+    log_dir = job_out_dir / "logs"
     os.makedirs(job_out_dir, exist_ok=True)
 
     logger.info("Generating dSQ job script for job file %s", job_file_path)
     subprocess.run(
         f'module load dSQ; dsq --job-file {job_file_path} --batch-file {job_script_path} '
-        f'-o {job_out_dir} --status-dir {job_out_dir} --partition {partition} '
+        f'-o {log_dir} --status-dir {log_dir} --partition {partition} '
         f'--cpus-per-task {cpus} --mem-per-cpu {mem_per_cpu} -t {time_limit} --mail-type FAIL',
         shell=True, check=True, executable='/bin/bash'
     )
@@ -48,8 +49,8 @@ def submit_dsq_array_job(job_file_path: Path, job_out_dir: Path, job_name: str =
     logger.info("Submitting job array via sbatch")
     result = subprocess.run(
         f'sbatch --job-name=dsq_{job_name} '
-        f'--output={job_out_dir}/fixation_%a.out '
-        f'--error={job_out_dir}/fixation_%a.err '
+        f'--output={log_dir}/fixation_%a.out '
+        f'--error={log_dir}/fixation_%a.err '
         f'{job_script_path}',
         shell=True, check=True, capture_output=True, text=True, executable='/bin/bash'
     )

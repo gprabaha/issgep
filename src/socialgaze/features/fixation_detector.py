@@ -43,11 +43,10 @@ class FixationDetector:
             tasks = [random.choice(tasks)]
 
         # Setup job output directory
-        output_dir = Path(self.config.output_dir)
-        jobs_dir = "jobs"
+        jobs_dir = Path("jobs")
         jobs_dir.mkdir(parents=True, exist_ok=True)
 
-        job_file_path = jobs_dir / fixation_config.job_file_name
+        job_file_path = jobs_dir / "scripts" / fixation_config.job_file_name
         script_path = fixation_config.job_script_path
 
         generate_fixation_job_file(
