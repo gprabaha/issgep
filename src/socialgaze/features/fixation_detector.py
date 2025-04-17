@@ -1,10 +1,10 @@
 # src/socialgaze/features/fixation_detector.py
 
 import logging
-import numpy as np
-import pandas as pd
 from typing import List, Tuple, Optional
 import random
+import numpy as np
+import pandas as pd
 from multiprocessing import Pool
 from pathlib import Path
 import shutil
@@ -44,7 +44,7 @@ class FixationDetector:
 
         # Setup job output directory
         output_dir = Path(self.config.output_dir)
-        jobs_dir = output_dir / "jobs"
+        jobs_dir = "jobs"
         jobs_dir.mkdir(parents=True, exist_ok=True)
 
         job_file_path = jobs_dir / fixation_config.job_file_name

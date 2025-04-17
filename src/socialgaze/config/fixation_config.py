@@ -17,6 +17,6 @@ class FixationConfig(BaseConfig):
         self.env_name: str = "gaze_otnal" if self.is_grace else "gaze_processing"
         self.job_script_path: str = "scripts/analysis/01_fixation_detection.py"
         self.job_file_name: str = "fixation_job_array.txt"
-        self.cpus_per_task: int = 16
+        self.cpus_per_task: int = 8
         self.mem_per_cpu: int = 1000  # in MB
         self.time_limit: str = "01:00:00"
