@@ -1,7 +1,8 @@
 # src/socialgaze/utils/path_utils.py
 
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Union
+
 
 def determine_root_data_dir(is_cluster: bool, is_grace: bool, prabaha_local: bool) -> str:
     """
@@ -17,13 +18,13 @@ def determine_root_data_dir(is_cluster: bool, is_grace: bool, prabaha_local: boo
     """
     if is_cluster:
         return (
-            "/gpfs/gibbs/project/chang/pg496/data_dir/social_gaze/"
+            Path("/gpfs/gibbs/project/chang/pg496/data_dir/social_gaze/")
             if is_grace else
-            "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/"
+            Path("/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/")
         )
     if prabaha_local:
-        return "/Users/prabaha/data_dir/social_gaze"
-    return "../data/raw"
+        return Path("/Users/prabaha/data_dir/social_gaze")
+    return Path("../data/raw")
 
 
 # Config
@@ -155,3 +156,18 @@ def get_roi_file_path(config, session_date: str, run_number: str) -> Path:
     """
     filename = config.file_pattern.format(session_date=session_date, run_number=run_number)
     return config.roi_dir / filename
+
+# General
+
+def join_folder_and_filename(folder: Union[str, Path], filename: str) -> Path:
+    """
+    Joins a folder path and filename to produce a full file path.
+
+    Args:
+        folder (Union[str, Path]): The folder path.
+        filename (str): The filename.
+
+    Returns:
+        Path: The combined file path.
+    """
+    return Path(folder) / filename

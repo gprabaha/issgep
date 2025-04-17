@@ -11,6 +11,22 @@ import pdb
 logger = logging.getLogger(__name__)
 
 
+def get_config_filename(is_cluster: bool, is_grace: bool) -> str:
+    """
+    Returns the default config filename based on environment flags.
+
+    Args:
+        is_cluster (bool): Whether the code is running on a cluster.
+        is_grace (bool): Whether the environment is Grace within the cluster.
+
+    Returns:
+        str: Name of the config file (e.g., "milgram_config.json").
+    """
+    if is_cluster:
+        return "grace_config.json" if is_grace else "milgram_config.json"
+    return "local_config.json"
+
+
 def get_mat_filename_pattern():
     """
     Returns the standardized filename pattern used for .mat files

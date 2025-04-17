@@ -26,6 +26,6 @@ if __name__ == "__main__":
     gaze_data.prune_and_interpolate()
 
     logger.info("Step 3: Saving cleaned DataFrames...")
-    gaze_data.save_as_dataframes(config.processed_data_dir)
+    gaze_data.save_as_dataframes()
 
     logger.info("Done.")

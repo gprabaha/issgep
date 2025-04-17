@@ -2,12 +2,13 @@
 
 import os
 import logging
-import pandas as pd
-import numpy as np
-from scipy.interpolate import interp1d
 from pathlib import Path
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Union
+import pandas as pd
+import numpy as np
+from scipy.interpolate import interp1d
+
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.path_utils import (
@@ -16,6 +17,8 @@ from socialgaze.utils.path_utils import (
     get_roi_file_path,
     get_time_file_path
 )
+from socialgaze.utils.saving_utils import save_df_to_pkl
+from socialgaze.utils.loading_utils import load_df_from_pkl, load_mat_from_path
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +48,7 @@ class GazeData:
         """
         self.config = config
         self.behav_data_loader_dict = self._generate_behav_data_loader_dict(config.behav_data_types)
-        self.timeseries: Dict[str, List[pd.DataFrame]] = defaultdict(list)
+        self.raw_data: Dict[str, List[pd.DataFrame]] = defaultdict(list)
 
 
     def _generate_behav_data_loader_dict(self, behav_data_types: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -99,7 +102,7 @@ class GazeData:
                     agent_filter: Optional[Union[str, List[str]]] = None,
                     data_types: Optional[List[str]] = None):
         """
-        Loads behavioral data from .mat files and stores them in self.timeseries.
+        Loads behavioral data from .mat files and stores them in self.raw_data.
 
         Optional filters can limit loading to specific sessions, runs, or agents.
 
@@ -132,19 +135,19 @@ class GazeData:
                             path = path_func(self.config, session_name, run_number)
                             df = process_func(path, session_name, run_number, agent)
                             if df is not None:
-                                self.timeseries[data_type].append(df)
+                                self.raw_data[data_type].append(df)
                     else:
                         path = path_func(self.config, session_name, run_number)
                         df = process_func(path, session_name, run_number)
                         if df is not None:
-                            self.timeseries[data_type].append(df)
-            self.timeseries[data_type] = pd.concat(self.timeseries[data_type], ignore_index=True)
+                            self.raw_data[data_type].append(df)
+            self.raw_data[data_type] = pd.concat(self.raw_data[data_type], ignore_index=True)
 
     # Load and save generated dataframes
     
     def load_from_saved_dataframes(self, data_types: Optional[List[str]] = None):
         """
-        Loads previously saved DataFrames from .pkl files into self.timeseries.
+        Loads previously saved DataFrames from .pkl files into self.raw_data.
 
         Args:
             data_types (List[str], optional): Data types to load. If None, all are loaded.
@@ -154,28 +157,29 @@ class GazeData:
             pkl_path = self.config.processed_data_dir / f"{data_type}.pkl"
             if pkl_path.exists():
                 try:
-                    df = pd.read_pickle(pkl_path)
-                    self.timeseries[data_type] = [df]
+                    df = load_df_from_pkl(pkl_path)
+                    self.raw_data[data_type] = [df]
                     logger.info(f"Loaded {data_type} from {pkl_path}")
                 except Exception as e:
                     logger.warning(f"Failed to load {data_type} from disk: {e}")
 
 
-    def save_as_dataframes(self, output_dir: Path):
+    def save_as_dataframes(self, output_dir: Optional[Path] = None):
         """
-        Saves all in-memory DataFrames in self.timeseries to the specified output directory as .pkl files.
+        Saves all in-memory DataFrames in self.raw_data to the specified output directory as .pkl files.
 
         Args:
-            output_dir (Path): Directory to save the pickle files in.
+            output_dir (Optional[Path]): Directory to save the pickle files in. Defaults to self.config.processed_data_dir.
         """
+        output_dir = output_dir or self.config.processed_data_dir
         os.makedirs(output_dir, exist_ok=True)
-        logger.info("Combining all dataframes and saving")
-        for data_type, df in self.timeseries.items():
+        logger.info("Saving raw data dataframes")
+        for data_type, df in self.raw_data.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 out_path = output_dir / f"{data_type}.pkl"
-                df.to_pickle(out_path)
-                logger.info(f"Saved {data_type}.pkl to {out_path}")
+                save_df_to_pkl(df, out_path)
         logger.info("All raw data saved as DataFrames.")
+
 
     # Fetch any part of the data
 
@@ -203,14 +207,14 @@ class GazeData:
             Optional[pd.DataFrame]: Filtered DataFrame, or None if not available.
         """
         # Check if already loaded
-        if data_type not in self.timeseries or self.timeseries[data_type] is None:
+        if data_type not in self.raw_data or self.raw_data[data_type] is None:
             # Try to load from saved .pkl
             if load_if_available:
                 logger.info(f"{data_type} not in memory. Attempting to load from .pkl...")
                 self.load_from_saved_dataframes([data_type])
 
             # Try to load from raw .mat
-            if (data_type not in self.timeseries or self.timeseries[data_type] is None) and fallback_to_mat:
+            if (data_type not in self.raw_data or self.raw_data[data_type] is None) and fallback_to_mat:
                 logger.warning(f"{data_type} still not loaded. Attempting raw .mat load...")
                 logger.info(f"Loading {data_type} from raw .mat files for session={session_name}, run={run_number}, agent={agent}")
                 self.load_raw_data_from_mat_files(
@@ -221,11 +225,11 @@ class GazeData:
                 )
 
         # Final check: do we have the data now?
-        if data_type not in self.timeseries or self.timeseries[data_type] is None:
+        if data_type not in self.raw_data or self.raw_data[data_type] is None:
             logger.warning(f"{data_type} not available in memory.")
             return None
 
-        df = self.timeseries[data_type]
+        df = self.raw_data[data_type]
         if session_name is not None:
             df = df[df["session_name"] == session_name]
         if run_number is not None:
@@ -241,12 +245,11 @@ class GazeData:
         Cleans timeline, position, and pupil data:
         - Removes invalid timeline entries (NaNs).
         - Interpolates missing values using sliding or linear interpolation.
-        - Overwrites self.timeseries with cleaned DataFrames.
+        - Overwrites self.raw_data with cleaned DataFrames.
         """
         df_positions = self._get_or_load_data("positions")
         df_pupils = self._get_or_load_data("pupil")
         df_timeline = self._get_or_load_data("neural_timeline")
-
 
         cleaned_pos_rows = []
         cleaned_pupil_rows = []
@@ -280,26 +283,13 @@ class GazeData:
             if i % 50 == 0 or i == len(grouped):
                 logger.info(f"Processed {i}/{len(grouped)} groups...")
 
-        self.timeseries["neural_timeline"] = pd.concat(cleaned_timeline_rows, ignore_index=True)
-        self.timeseries["positions"] = pd.DataFrame(cleaned_pos_rows)
-        self.timeseries["pupil"] = pd.DataFrame(cleaned_pupil_rows)
+        self.raw_data["neural_timeline"] = pd.concat(cleaned_timeline_rows, ignore_index=True)
+        self.raw_data["positions"] = pd.DataFrame(cleaned_pos_rows)
+        self.raw_data["pupil"] = pd.DataFrame(cleaned_pupil_rows)
 
     # -----------------------------
     # 3. MAT file internals
     # -----------------------------
-
-    def _load_mat_from_path(self, path) -> dict:
-        """
-        Loads and parses a .mat file.
-
-        Args:
-            path (Path or str): Path to the .mat file.
-
-        Returns:
-            dict: Dictionary of parsed MATLAB variables.
-        """
-        from scipy.io import loadmat
-        return loadmat(str(path), simplify_cells=False)
 
 
     def _extract_aligned_struct(self, mat_data: dict):
@@ -349,7 +339,7 @@ class GazeData:
         Returns:
             Optional[pd.DataFrame]: Single-row DataFrame or None if unavailable.
         """
-        mat_data = self._load_mat_from_path(mat_file)
+        mat_data = load_mat_from_path(mat_file)
         aligned = self._extract_aligned_struct(mat_data)
         if aligned is not None and agent in aligned.dtype.names:
             data = aligned[agent]
@@ -376,7 +366,7 @@ class GazeData:
         Returns:
             Optional[pd.DataFrame]: Single-row DataFrame or None if unavailable.
         """
-        mat_data = self._load_mat_from_path(mat_file)
+        mat_data = load_mat_from_path(mat_file)
         aligned = self._extract_aligned_struct(mat_data)
         if aligned is not None and agent in aligned.dtype.names:
             data = aligned[agent]
@@ -402,7 +392,7 @@ class GazeData:
         Returns:
             Optional[pd.DataFrame]: Single-row DataFrame or None if unavailable.
         """
-        mat_data = self._load_mat_from_path(mat_file)
+        mat_data = load_mat_from_path(mat_file)
         for key in ['time_file', 'aligned_position_file', 'var']:
             if key in mat_data and 't' in mat_data[key][0][0].dtype.names:
                 t = mat_data[key][0][0]['t']
@@ -426,7 +416,7 @@ class GazeData:
         Returns:
             Optional[pd.DataFrame]: Single-row DataFrame or None if unavailable.
         """
-        mat_data = self._load_mat_from_path(mat_file)
+        mat_data = load_mat_from_path(mat_file)
         if 'roi_rects' in mat_data:
             roi_data = mat_data['roi_rects'][0][0]
             if agent in roi_data.dtype.names:
@@ -458,7 +448,7 @@ class GazeData:
         otherwise, attempts to load it using `get_data`.
 
         This is a convenience wrapper to avoid repetitive checking
-        of `self.timeseries.get(...)` followed by a call to `get_data(...)`.
+        of `self.raw_data.get(...)` followed by a call to `get_data(...)`.
 
         Args:
             data_type (str): One of the behavioral data types (e.g., 'positions', 'pupil', etc.).
@@ -466,7 +456,7 @@ class GazeData:
         Returns:
             Optional[pd.DataFrame]: The DataFrame for the requested data type, or None if unavailable.
         """
-        df = self.timeseries.get(data_type)
+        df = self.raw_data.get(data_type)
         return df if df is not None else self.get_data(data_type)
 
 

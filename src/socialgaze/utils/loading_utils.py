@@ -5,6 +5,7 @@ from typing import Dict, Any
 import json
 import logging
 import pandas as pd
+from scipy.io import loadmat
 
 logger = logging.getLogger(__name__)
 
@@ -36,5 +37,17 @@ def load_df_from_pkl(filepath: str) -> pd.DataFrame:
     -------
     - Loaded dataframe or None
     """
-    logger.info(f"Loading pickle file from {filepath}")
+    logger.info(f"Loading pickled dataframe from {filepath}")
     return pd.read_pickle(filepath) if filepath.exists() else None
+
+def load_mat_from_path(path) -> dict:
+    """
+    Loads and parses a .mat file.
+
+    Args:
+        path (Path or str): Path to the .mat file.
+
+    Returns:
+        dict: Dictionary of parsed MATLAB variables.
+    """
+    return loadmat(str(path), simplify_cells=False)

@@ -17,9 +17,11 @@ from socialgaze.utils.path_utils import (
     get_raw_data_directories,
     get_pupil_file_path,
     get_roi_file_path,
-    get_time_file_path
+    get_time_file_path,
+    join_folder_and_filename
 )
 from socialgaze.utils.discovery_utils import (
+    get_config_filename,
     get_mat_filename_pattern,
     find_valid_sessions,
     filter_sessions_with_ephys
@@ -58,47 +60,45 @@ class BaseConfig:
 
         self.project_root = get_project_root()
         self.config_folder = get_default_config_folder(self.project_root)
-        self.filename = self.get_config_filename()
+        self.filename = get_config_filename(self.is_cluster, self.is_grace)
 
         # Determine config save path
-        self.config_path = Path(config_path) if config_path else self.config_folder / self.filename
-
-        # Core data/output paths
-        paths = get_default_data_paths(self.project_root)
-        self.processed_data_dir = paths["processed"]
-        self.output_dir = paths["outputs"]
-        self.plots_dir = paths["plots"]
-
-        self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
-
-        # Raw data root and subfolders
-        self.data_dir = Path(determine_root_data_dir(
-            is_cluster=self.is_cluster,
-            is_grace=self.is_grace,
-            prabaha_local=self.prabaha_local
-        ))
-        raw_dirs = get_raw_data_directories(self.data_dir)
-        self.position_dir = raw_dirs["position"]
-        self.time_dir = raw_dirs["time"]
-        self.pupil_dir = raw_dirs["pupil"]
-        self.roi_dir = raw_dirs["roi"]
-
-        self.file_pattern = get_mat_filename_pattern()
+        self.config_path = Path(config_path) if config_path else join_folder_and_filename(self.config_folder, self.filename)
 
         self.session_names: List[str] = []
         self.runs_by_session: Dict[str, List[str]] = {}
 
         # Main logic: Load existing config or generate new one
         if self.config_path.exists():
-            logger.info(f"Loading config from {self.config_path}")
+            logger.info(f"Loading existing config from {self.config_path}")
             self.load_from_file(self.config_path)
         else:
             logger.info(f"No config found at {self.config_path}. Generating new config.")
+            # Core data/output paths
+            paths = get_default_data_paths(self.project_root)
+            self.processed_data_dir = paths["processed"]
+            self.output_dir = paths["outputs"]
+            self.plots_dir = paths["plots"]
+
+            self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
+
+            # Raw data root and subfolders
+            self.data_dir = determine_root_data_dir(
+                is_cluster=self.is_cluster,
+                is_grace=self.is_grace,
+                prabaha_local=self.prabaha_local
+            )
+            raw_dirs = get_raw_data_directories(self.data_dir)
+            self.position_dir = raw_dirs["position"]
+            self.time_dir = raw_dirs["time"]
+            self.pupil_dir = raw_dirs["pupil"]
+            self.roi_dir = raw_dirs["roi"]
+
+            self.file_pattern = get_mat_filename_pattern()
             self.initialize_sessions_and_runs()
 
             ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
             ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
-            self.ephys_days_and_monkeys = ephys_days_and_monkeys_df
 
             self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
             self.save_to_file(self.config_path)
@@ -139,17 +139,6 @@ class BaseConfig:
     # -----------------------------
     # Session / run discovery
     # -----------------------------
-
-    def get_config_filename(self) -> str:
-        """
-        Returns the default config filename based on environment.
-
-        Returns:
-            str: Name of the config file (e.g., "milgram_config.json").
-        """
-        if self.is_cluster:
-            return "grace_config.json" if self.is_grace else "milgram_config.json"
-        return "local_config.json"
 
     def initialize_sessions_and_runs(self) -> None:
         """
