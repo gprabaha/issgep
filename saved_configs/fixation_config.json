@@ -1,0 +1,14 @@
+{
+    "test_single_run": false,
+    "detect_fixations_again": true,
+    "update_labes_in_dfs": true,
+    "fixation_labeling_log_interval": 100,
+    "job_name": "fixation",
+    "partition": "psych_day",
+    "env_name": "gaze_processing",
+    "python_script_relative": "scripts/analysis/01_fixation_detection.py",
+    "job_file_name": "fixation_job_array.txt",
+    "cpus_per_task": 1,
+    "mem_per_cpu": 8000,
+    "time_limit": "00:15:00"
+}

@@ -30,7 +30,7 @@ def assign_dict_attributes_to_object(obj: Any, config_data: Dict[str, Any]) -> N
         config_data (Dict[str, Any]): The configuration data.
     """
     for key, value in config_data.items():
-        if isinstance(value, str) and ("dir" in key or "path" in key):
+        if isinstance(value, str) and ("dir" in key or "path" in key or "folder" in key):
             setattr(obj, key, Path(value))
         else:
             setattr(obj, key, value)

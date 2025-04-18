@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --output jobs/logs
+#SBATCH --output /gpfs/milgram/pi/chang/pg496/repositories/issgep/jobs/logs
 #SBATCH --array 0-833
 #SBATCH --job-name dsq-fixation_job_array
 #SBATCH --partition psych_day --cpus-per-task 1 --mem-per-cpu 8000 -t 00:15:00 --mail-type FAIL

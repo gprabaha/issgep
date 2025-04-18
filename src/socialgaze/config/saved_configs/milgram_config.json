@@ -15,12 +15,6 @@
         "pupil",
         "neural_timeline"
     ],
-    "data_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze",
-    "position_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/position",
-    "time_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/time",
-    "pupil_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/pupil_size",
-    "roi_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/roi_rects",
-    "file_pattern": "{session_date}_position_{run_number}.mat",
     "session_names": [
         "01022019",
         "01032019",
@@ -567,5 +561,11 @@
             "8",
             "9"
         ]
-    }
+    },
+    "data_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze",
+    "position_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/position",
+    "time_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/time",
+    "pupil_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/pupil_size",
+    "roi_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/roi_rects",
+    "file_pattern": "{session_date}_position_{run_number}.mat"
 }

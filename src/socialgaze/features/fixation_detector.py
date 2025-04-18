@@ -33,38 +33,27 @@ class FixationDetector:
         self.saccades = pd.DataFrame()
 
 
-    def detect_fixations_through_hpc_jobs(self, fixation_config: FixationConfig):
+    def detect_fixations_through_hpc_jobs(self):
         logger.info("\n ** Generating fixation and saccade detection jobs...")
         logger.info("Loading positions to generate jobs...")
+        config = self.config
         pos_df = self.gaze_data.get_data("positions", load_if_available=True)
         if pos_df is None or pos_df.empty:
             logger.warning("No position data found — aborting job creation.")
             return
 
         tasks = list(pos_df.groupby(["session_name", "run_number", "agent"]).groups.keys())
-        if fixation_config.test_single_run:
+        if config.test_single_run:
             logger.info("Test mode enabled: running only one randomly selected job.")
             tasks = [random.choice(tasks)]
 
-        generate_fixation_job_file(
-            tasks=tasks,
-            job_file_path=job_file_path,
-            script_path=script_path,
-            is_grace=self.config.is_grace
-        )
+        generate_fixation_job_file(tasks=tasks, config=config)
 
-        job_id = submit_dsq_array_job(
-            job_file_path=job_file_path,
-            job_out_dir=jobs_dir,
-            job_name=fixation_config.job_name,
-            partition=fixation_config.partition,
-            cpus=fixation_config.cpus_per_task,
-            mem_per_cpu=fixation_config.mem_per_cpu,
-            time_limit=fixation_config.time_limit
-        )
+        job_id = submit_dsq_array_job(config=config)
 
         track_job_completion(job_id)
         self._load_fixation_and_saccade_results(tasks)
+
 
 
     def _load_fixation_and_saccade_results(self, tasks: List[Tuple[str, str, str]]):
@@ -120,14 +109,10 @@ class FixationDetector:
         positions = np.stack([x, y], axis=1)
         non_nan_chunks, chunk_start_indices = _extract_non_nan_chunks(positions)
         args = [(chunk, start) for chunk, start in zip(non_nan_chunks, chunk_start_indices)]
-        if config.use_parallel:
-            logger.info("Detecting fixations and saccads for chunks in parallel")
-            num_cpus = getattr(config, "num_cpus", 1)
-            with Pool(processes=min(16, num_cpus)) as pool:
-                results = pool.map(_detect_fix_sacc_in_chunk, args)
-        else:
-            logger.info("Detecting fixations and saccads for chunks in serial")
-            results = [_detect_fix_sacc_in_chunk(arg) for arg in args]
+
+        logger.info("Detecting fixations and saccads for chunks in serial")
+        results = [_detect_fix_sacc_in_chunk(arg) for arg in args]
+        
         all_fix_start_stops = np.concatenate([r[0] for r in results], axis=0)
         all_sacc_start_stops = np.concatenate([r[1] for r in results], axis=0)
         all_events = np.vstack((all_fix_start_stops, all_sacc_start_stops))

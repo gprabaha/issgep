@@ -55,8 +55,7 @@ def main():
         detector.detect_fixations_and_saccades_in_single_run(
             session_name=args.session,
             run_number=args.run,
-            agent=args.agent,
-            config=fixation_config
+            agent=args.agent
         )
         detector.save_dataframes()
         logger.info("Saved results for single-run.")
@@ -65,7 +64,7 @@ def main():
     # Mode 2: Full dataset detection or label update
     if fixation_config.detect_fixations_again:
         logger.info("Submitting full fixation detection jobs to HPC...")
-        detector.detect_fixations_through_hpc_jobs(fixation_config)
+        detector.detect_fixations_through_hpc_jobs()
         detector.save_dataframes()
         logger.info("Saved fixation/saccade dataframes after HPC job.")
     else:
