@@ -15,6 +15,9 @@ from socialgaze.utils.path_utils import (
     get_worker_python_script_path,
     get_sbatch_script_path
 )
+from socialgaze.utils.saving_utils import save_config_to_json
+from socialgaze.utils.loading_utils import load_config_from_json
+from socialgaze.utils.conversion_utils import object_to_dict, assign_dict_attributes_to_object
 
 logger = logging.getLogger(__name__)
 
@@ -83,26 +86,14 @@ class FixationConfig(BaseConfig):
             "time_limit": self.time_limit
         }
 
-    def update_from_dict(self, cfg_dict: dict):
-        """
-        Updates this config object from a dictionary of values.
-
-        Args:
-            cfg_dict (dict): Dictionary of values to update from.
-        """
-        for k, v in cfg_dict.items():
-            if hasattr(self, k):
-                setattr(self, k, v)
-        self._assign_paths()
 
     def save_to_json(self):
         """
         Saves the fixation config to a default JSON path based on project_root.
         """
-        save_path = self.fixation_config_path
-        with open(save_path, "w") as f:
-            json.dump(self.to_dict(), f, indent=4)
-        logger.info("Saved fixation config to %s", save_path)
+        save_config_to_json(object_to_dict(self), self.fixation_config_path)
+        logger.info("Saved fixation config to %s", self.fixation_config_path)
+
 
     @classmethod
     def load_from_json(cls, base_config: BaseConfig):
@@ -115,11 +106,20 @@ class FixationConfig(BaseConfig):
         Returns:
             FixationConfig: Fully populated FixationConfig instance.
         """
-        load_path = self.fixation_config_path
-        with open(load_path, "r") as f:
-            data = json.load(f)
-        fix_cfg = cls()
-        fix_cfg.__dict__.update(base_config.__dict__)  # Inherit base config
-        fix_cfg.update_from_dict(data)
-        return fix_cfg
+        load_path = base_config.fixation_config_path
+        config_data = load_config_from_json(load_path)
+        fixation_config = cls()
+        fixation_config.__dict__.update(base_config.__dict__)  # inherit all base_config attributes
+        fixation_config._update_from_dict(config_data)
+        return fixation_config
+    
+    
+    def _update_from_dict(self, cfg_dict: dict):
+        """
+        Updates this config object from a dictionary of values.
 
+        Args:
+            cfg_dict (dict): Dictionary of values to update from.
+        """
+        assign_dict_attributes_to_object(self, cfg_dict)
+        self._assign_paths()
