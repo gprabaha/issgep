@@ -51,7 +51,7 @@ class FixationConfig(BaseConfig):
 
     def _assign_paths(self):
         """Assigns all path attributes based on current config values."""
-        self.fixation_config_path = get_fixation_config_json_path(self.project_root)
+        self.fixation_config_path = get_fixation_config_json_path(self.config_folder)
         self.temp_dir = get_fixation_temp_dir(self.processed_data_dir)
         self.fixation_df_path = get_fixation_df_path(self.processed_data_dir)
         self.saccade_df_path = get_saccade_df_path(self.processed_data_dir)

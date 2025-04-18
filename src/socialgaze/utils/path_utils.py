@@ -162,7 +162,7 @@ def get_roi_file_path(config, session_date: str, run_number: str) -> Path:
 # Fixation jobs
 # ----------------------
 
-def get_fixation_config_json_path(project_root: Path) -> Path:
+def get_fixation_config_json_path(config_folder: Path) -> Path:
     """
     Returns the default save/load path for the fixation config JSON file.
 
@@ -172,7 +172,7 @@ def get_fixation_config_json_path(project_root: Path) -> Path:
     Returns:
         Path: Full path to 'saved_configs/fixation_config.json'
     """
-    path = Path(project_root) / "saved_configs" / "fixation_config.json"
+    path = Path(config_folder) / "fixation_config.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
