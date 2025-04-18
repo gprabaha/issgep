@@ -33,7 +33,8 @@ class FixationDetector:
 
 
     def detect_fixations_through_hpc_jobs(self, fixation_config: FixationConfig):
-        logger.info("Loading positions to generate fixation detection jobs...")
+        logger.info("\n ** Generating fixation and saccade detection jobs...")
+        logger.info("Loading positions to generate jobs...")
         pos_df = self.gaze_data.get_data("positions", load_if_available=True)
         if pos_df is None or pos_df.empty:
             logger.warning("No position data found — aborting job creation.")
@@ -105,7 +106,7 @@ class FixationDetector:
         agent: str,
         config: FixationConfig
     ) -> None:
-        logger.info(f"Running fixation detection for session={session_name}, run={run_number}, agent={agent}")
+        logger.info(f"\n ** Running fixation detection for session={session_name}, run={run_number}, agent={agent}")
 
         pos_df = self.gaze_data.get_data("positions", session_name=session_name, run_number=run_number, agent=agent)
         if pos_df is None:
@@ -183,7 +184,7 @@ class FixationDetector:
         """
         Annotates each fixation event with the ROI location label, based on average gaze coordinates.
         """
-        logger.info("Updating locations of fixations in self.fixations")
+        logger.info("\n ** Updating locations of fixations in self.fixations")
         if self.fixations is None or self.fixations.empty:
             logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
             self.load_dataframes("fixations")
@@ -232,7 +233,7 @@ class FixationDetector:
         """
         Annotates each saccade event with the 'from' and 'to' ROI labels based on gaze start/stop points.
         """
-        logger.info("Updating from and to locations of saccades in self.saccades")
+        logger.info("\n ** Updating from and to locations of saccades in self.saccades")
         if self.saccades is None or self.saccades.empty:
             logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
             self.load_dataframes("saccades")
@@ -280,11 +281,8 @@ class FixationDetector:
         self.saccades.at[group.index[0], "to"] = to_rois
 
 
-    def reconcile_fixation_saccade_mismatches(self):
-        """
-        Orchestrates correction of ROI label mismatches between consecutive fixations and saccades.
-        """
-        logger.info("Reconciling fixation-saccade location mismatches...")
+    def reconcile_fixation_saccade_label_mismatches(self):
+        logger.info("\n ** Reconciling fixation-saccade location mismatches...")
         self._ensure_fix_and_saccade_data_is_loaded_and_labelled()
 
         fixation_groups = self.fixations.groupby(["session_name", "run_number", "agent"])
@@ -295,8 +293,11 @@ class FixationDetector:
         for idx, key in enumerate(sorted(all_keys)):
             if idx % log_interval == 0:
                 logger.info("Processing alignment group %d / %d", idx, len(all_keys))
-            self._align_fixation_saccade_pair_for_key(key, fixation_groups, saccade_groups)
-
+            
+            # Keep reconciling until no changes are made
+            changes_made = True
+            while changes_made:
+                changes_made = self._align_fixation_saccade_pair_for_key(key, fixation_groups, saccade_groups)
 
 
     def _ensure_fix_and_saccade_data_is_loaded_and_labelled(self):
@@ -314,7 +315,7 @@ class FixationDetector:
             self.update_saccade_from_to()
 
 
-    def _align_fixation_saccade_pair_for_key(self, key, fixation_groups, saccade_groups):
+    def _align_fixation_saccade_pair_for_key(self, key, fixation_groups, saccade_groups) -> bool:
         session_name, run_number, agent = key
 
         fixation_row = fixation_groups.get_group(key).iloc[0]
@@ -331,16 +332,18 @@ class FixationDetector:
 
         events = _merge_and_sort_gaze_events(fixation_starts, fixation_stops, saccade_starts, saccade_stops)
 
-        fixation_locs, saccade_froms, saccade_tos = self._correct_event_label_mismatches(
+        new_fix_locs, new_sacc_froms, new_sacc_tos, changes_made = self._correct_event_label_mismatches(
             session_name, run_number, agent, events, fixation_locs, saccade_froms, saccade_tos
         )
+        self.fixations.at[fixation_row.name, "location"] = new_fix_locs
+        self.saccades.at[saccade_row.name, "from"] = new_sacc_froms
+        self.saccades.at[saccade_row.name, "to"] = new_sacc_tos
+        return changes_made
 
-        self.fixations.at[fixation_row.name, "location"] = fixation_locs
-        self.saccades.at[saccade_row.name, "from"] = saccade_froms
-        self.saccades.at[saccade_row.name, "to"] = saccade_tos
 
-
-    def _correct_event_label_mismatches(self, session_name, run_number, agent, events, fixation_locs, saccade_froms, saccade_tos):
+    def _correct_event_label_mismatches(self, session_name, run_number, agent, events,
+                                        fixation_locs, saccade_froms, saccade_tos):
+        changes_made = False
         for i in range(len(events) - 1):
             start1, end1, type1, index1 = events[i]
             start2, end2, type2, index2 = events[i + 1]
@@ -353,10 +356,11 @@ class FixationDetector:
                     if "out_of_roi" in fix_lbl:
                         logger.info(f"[{session_name}-{run_number}-{agent}] Fixation {index1} out_of_roi → {sacc_from_lbl}")
                         fixation_locs[index1] = sacc_from_lbl
+                        changes_made = True
                     elif "out_of_roi" in sacc_from_lbl:
                         logger.info(f"[{session_name}-{run_number}-{agent}] Saccade-from {index2} out_of_roi → {fix_lbl}")
                         saccade_froms[index2] = fix_lbl
-
+                        changes_made = True
             elif type1 == "saccade" and type2 == "fixation":
                 sacc_to_lbl = saccade_tos[index1]
                 fix_lbl = fixation_locs[index2]
@@ -364,10 +368,13 @@ class FixationDetector:
                     if "out_of_roi" in fix_lbl:
                         logger.info(f"[{session_name}-{run_number}-{agent}] Fixation {index2} out_of_roi → {sacc_to_lbl}")
                         fixation_locs[index2] = sacc_to_lbl
+                        changes_made = True
                     elif "out_of_roi" in sacc_to_lbl:
                         logger.info(f"[{session_name}-{run_number}-{agent}] Saccade-to {index1} out_of_roi → {fix_lbl}")
                         saccade_tos[index1] = fix_lbl
-        return fixation_locs, saccade_froms, saccade_tos
+                        changes_made = True
+        return fixation_locs, saccade_froms, saccade_tos, changes_made
+
 
 
 # Fixation and saccade detection functions
