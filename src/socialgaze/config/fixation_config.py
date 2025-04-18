@@ -10,7 +10,8 @@ class FixationConfig(BaseConfig):
         self.test_single_run: bool = False
         self.use_parallel: bool = False
         self.num_cpus: int = 8
-        self.detect_fixations_again = True
+        self.detect_fixations_again = False
+        self.update_labes_in_dfs = False
         self.fixation_labeling_log_interval = 100  # or whatever default you want
 
         # HPC job parameters

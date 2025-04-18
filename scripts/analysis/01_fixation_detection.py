@@ -72,17 +72,28 @@ def main():
         logger.info("Loading previously saved fixation and saccade dataframes...")
         detector.load_dataframes()
 
-    # Label and reconcile
-    logger.info("Updating fixation ROI labels...")
-    detector.update_fixation_locations()
-    logger.info("Updating saccade ROI labels...")
-    detector.update_saccade_from_to()
-    logger.info("Reconciling mismatched fixation/saccade labels...")
-    detector.reconcile_fixation_saccade_mismatches()
-    
-    # Save final results
-    detector.save_dataframes()
-    logger.info("Final dataframes saved successfully.")
+    if fixation_config.update_labes_in_dfs:
+        # Label and reconcile
+        logger.info("Updating fixation ROI labels...")
+        detector.update_fixation_locations()
+        logger.info("Updating saccade ROI labels...")
+        detector.update_saccade_from_to()
+        logger.info("Reconciling mismatched fixation/saccade labels...")
+        detector.reconcile_fixation_saccade_label_mismatches()
+        logger.info("Fixations df head:")
+        logger.info(detector.fixations.head())
+        logger.info("Saccades df head:")
+        logger.info(detector.saccades.head())
+        # Save final results
+        detector.save_dataframes()
+        logger.info("Final dataframes saved successfully.")
+    else:
+        logger.info("Fixations and saccades already detected and labelled...")
+        logger.info("Fixations df head:")
+        logger.info(detector.fixations.head())
+        logger.info("Saccades df head:")
+        logger.info(detector.saccades.head())
+    logger.info("Done.")
 
 
 if __name__ == "__main__":
