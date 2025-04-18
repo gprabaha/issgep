@@ -41,7 +41,7 @@ class FixationConfig(BaseConfig):
         self.job_name: str = "fixation"
         self.partition: str = "day" if self.is_grace else "psych_day"
         self.env_name: str = "gaze_otnal" if self.is_grace else "gaze_processing"
-        self.python_script_relative: str = "scripts/analysis/01_fixation_detection.py"
+        self.python_script_relative: str = "scripts/behav_analysis/01_fixation_detection.py"
         self.job_file_name: str = "fixation_job_array.txt"
         self.cpus_per_task: int = 1
         self.mem_per_cpu: int = 8000  # in MB

@@ -13,4 +13,4 @@ conda deactivate
 conda activate gaze_processing
 
 # Run your script
-python scripts/analysis/01_fixation_detection.py
+python scripts/behav_analysis/01_fixation_detection.py

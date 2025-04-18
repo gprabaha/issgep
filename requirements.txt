@@ -1,0 +1,89 @@
+absl-py
+astroid
+attrs
+autograd
+av
+chex
+cloudpickle
+colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1733218098505/work
+contourpy @ file:///home/conda/feedstock_root/build_artifacts/contourpy_1731428322366/work
+cycler @ file:///home/conda/feedstock_root/build_artifacts/cycler_1733332471406/work
+Cython @ file:///home/conda/feedstock_root/build_artifacts/cython_1739227941089/work
+decorator
+dill
+dm-tree
+dynamax
+fastprogress
+filelock
+fonttools @ file:///home/conda/feedstock_root/build_artifacts/fonttools_1738940303262/work
+fsspec
+future @ file:///home/conda/feedstock_root/build_artifacts/future_1738926421307/work
+gast
+imageio @ file:///home/conda/feedstock_root/build_artifacts/imageio_1738273805233/work
+imageio-ffmpeg
+isort
+jax
+jaxlib
+jaxtyping
+Jinja2
+joblib @ file:///home/conda/feedstock_root/build_artifacts/joblib_1733736026804/work
+kiwisolver @ file:///home/conda/feedstock_root/build_artifacts/kiwisolver_1725459213453/work
+llvmlite
+MarkupSafe
+matplotlib
+mccabe
+ml_dtypes
+mpmath
+munkres
+networkx
+numba
+numpy
+nvidia-cublas-cu11
+nvidia-cuda-cupti-cu11
+nvidia-cuda-nvrtc-cu11
+nvidia-cuda-runtime-cu11
+nvidia-cudnn-cu11
+nvidia-cufft-cu11
+nvidia-curand-cu11
+nvidia-cusolver-cu11
+nvidia-cusparse-cu11
+nvidia-nccl-cu11
+nvidia-nvtx-cu11
+opt_einsum
+optax
+packaging @ file:///home/conda/feedstock_root/build_artifacts/packaging_1733203243479/work
+pandas @ file:///home/conda/feedstock_root/build_artifacts/pandas_1726878398774/work
+patsy @ file:///home/conda/feedstock_root/build_artifacts/patsy_1733792384640/work
+pillow @ file:///home/conda/feedstock_root/build_artifacts/pillow_1735929693232/work
+platformdirs
+pylint
+pyparsing @ file:///home/conda/feedstock_root/build_artifacts/pyparsing_1735698276679/work
+PySide6
+python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/python-dateutil_1733215673016/work
+pytz @ file:///home/conda/feedstock_root/build_artifacts/pytz_1706886791323/work
+scikit-learn @ file:///home/conda/feedstock_root/build_artifacts/scikit-learn_1736496756180/work/dist/scikit_learn-1.6.1-cp310-cp310-linux_x86_64.whl#sha256
+scipy
+seaborn @ file:///home/conda/feedstock_root/build_artifacts/seaborn-split_1733730015268/work
+shiboken6
+six @ file:///home/conda/feedstock_root/build_artifacts/six_1733380938961/work
+-e git+ssh://git@github.com/gprabaha/issgep.git@0102930627524992782cfcce63efd3dd6584e788#egg
+ssm @ git+https://github.com/lindermanlab/ssm.git@6c856ad3967941d176eb348bcd490cfaaa08ba60
+statsmodels @ file:///home/conda/feedstock_root/build_artifacts/statsmodels_1727986707121/work
+sympy
+tensorflow-probability
+threadpoolctl @ file:///home/conda/feedstock_root/build_artifacts/threadpoolctl_1714400101435/work
+tomli
+tomlkit
+toolz
+torch
+torchaudio
+torchvision
+tornado @ file:///home/conda/feedstock_root/build_artifacts/tornado_1732615898999/work
+tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1735661334605/work
+triton
+typing_extensions
+tzdata @ file:///home/conda/feedstock_root/build_artifacts/python-tzdata_1737541069190/work
+unicodedata2 @ file:///home/conda/feedstock_root/build_artifacts/unicodedata2_1736692496989/work
+vulture
+wadler_lindig
+wrapt
