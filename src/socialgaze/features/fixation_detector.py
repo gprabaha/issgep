@@ -19,6 +19,7 @@ from socialgaze.utils.hpc_utils import (
     submit_dsq_array_job,
     track_job_completion
 )
+from socialgaze.utils.path_utils import get_fixation_job_result_path, get_saccade_job_result_path
 from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.utils.saving_utils import save_df_to_pkl
 
@@ -45,13 +46,6 @@ class FixationDetector:
             logger.info("Test mode enabled: running only one randomly selected job.")
             tasks = [random.choice(tasks)]
 
-        # Setup job output directory
-        jobs_dir = Path("jobs")
-        jobs_dir.mkdir(parents=True, exist_ok=True)
-
-        job_file_path = jobs_dir / "scripts" / fixation_config.job_file_name
-        script_path = fixation_config.job_script_path
-
         generate_fixation_job_file(
             tasks=tasks,
             job_file_path=job_file_path,
@@ -74,22 +68,31 @@ class FixationDetector:
 
 
     def _load_fixation_and_saccade_results(self, tasks: List[Tuple[str, str, str]]):
-        temp_dir = Path(self.config.processed_data_dir) / "temp"
+        """
+        Loads fixation and saccade DataFrames from the temp directory for each (session, run, agent) task.
+        After loading, cleans up the temp directory.
+        """
         fix_dfs, sacc_dfs = [], []
+        temp_dir = self.config.temp_dir
         logger.info("Loading fixation and saccade dfs exported from array jobs")
+
         for session, run, agent in tasks:
-            fix_path = temp_dir / f"fixations_{session}_{run}_{agent}.pkl"
-            sacc_path = temp_dir / f"saccades_{session}_{run}_{agent}.pkl"
+            fix_path = get_fixation_job_result_path(temp_dir, session, run, agent)
+            sacc_path = get_saccade_job_result_path(temp_dir, session, run, agent)
+
             if fix_path.exists():
                 fix_dfs.append(load_df_from_pkl(fix_path))
             else:
                 logger.warning("Missing fixation file: %s", fix_path)
+
             if sacc_path.exists():
                 sacc_dfs.append(load_df_from_pkl(sacc_path))
             else:
                 logger.warning("Missing saccade file: %s", sacc_path)
+
         self.fixations = pd.concat(fix_dfs, ignore_index=True) if fix_dfs else pd.DataFrame()
         self.saccades = pd.concat(sacc_dfs, ignore_index=True) if sacc_dfs else pd.DataFrame()
+
         # Clean up temp folder
         if temp_dir.exists():
             try:
@@ -99,15 +102,15 @@ class FixationDetector:
                 logger.warning(f"Failed to delete temp directory {temp_dir}: {e}")
 
 
+
     def detect_fixations_and_saccades_in_single_run(
         self,
         session_name: str,
         run_number: str,
-        agent: str,
-        config: FixationConfig
+        agent: str
     ) -> None:
         logger.info(f"\n ** Running fixation detection for session={session_name}, run={run_number}, agent={agent}")
-
+        config = self.config
         pos_df = self.gaze_data.get_data("positions", session_name=session_name, run_number=run_number, agent=agent)
         if pos_df is None:
             logger.warning("No position data found for given run.")
@@ -131,36 +134,44 @@ class FixationDetector:
         all_events = all_events[np.argsort(all_events[:, 0])]
         for i in range(len(all_events) - 1):
             assert all_events[i][1] < all_events[i + 1][0], f"Overlap detected between {all_events[i]} and {all_events[i+1]}"
-        temp_dir = Path(self.config.processed_data_dir) / "temp"
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = self.config.temp_dir
         fixation_df = _build_event_df(all_fix_start_stops, session_name, run_number, agent)
         saccade_df = _build_event_df(all_sacc_start_stops, session_name, run_number, agent)
         logger.info("Head of detected fixation df:")
         logger.info(fixation_df.head())
         logger.info("Head of detected saccade df:")
         logger.info(saccade_df.head())
-        save_df_to_pkl(fixation_df, temp_dir / f"fixations_{session_name}_{run_number}_{agent}.pkl")
-        save_df_to_pkl(saccade_df, temp_dir / f"saccades_{session_name}_{run_number}_{agent}.pkl")
+        fix_path = get_fixation_job_result_path(temp_dir, session_name, run_number, agent)
+        sacc_path = get_saccade_job_result_path(temp_dir, session_name, run_number, agent)
+        save_df_to_pkl(fixation_df, fix_path)
+        save_df_to_pkl(saccade_df, sacc_path)
 
 
     def save_dataframes(self):
-        save_df_to_pkl(self.fixations, Path(self.config.processed_data_dir) / "fixations.pkl")
-        save_df_to_pkl(self.saccades, Path(self.config.processed_data_dir) / "saccades.pkl")
+        """
+        Saves fixations and saccades DataFrames to their configured paths.
+        """
+        save_df_to_pkl(self.fixations, self.config.fixation_df_path)
+        save_df_to_pkl(self.saccades, self.config.saccade_df_path)
 
 
     def load_dataframes(self, behavior_type: Optional[str] = None):
-        fix_path = Path(self.config.processed_data_dir) / "fixations.pkl"
-        sacc_path = Path(self.config.processed_data_dir) / "saccades.pkl"
+        """
+        Loads fixation and/or saccade DataFrames from their configured paths.
+        Raises error if the file is missing.
+        """
         if behavior_type == "fixations" or behavior_type is None:
-            if fix_path.exists():
-                self.fixations = load_df_from_pkl(fix_path)
+            if self.config.fixation_df_path.exists():
+                self.fixations = load_df_from_pkl(self.config.fixation_df_path)
             else:
-                raise FileNotFoundError(f"Missing {fix_path}")
+                raise FileNotFoundError(f"Missing {self.config.fixation_df_path}")
+
         if behavior_type == "saccades" or behavior_type is None:
-            if sacc_path.exists():
-                self.saccades = load_df_from_pkl(sacc_path)
+            if self.config.saccade_df_path.exists():
+                self.saccades = load_df_from_pkl(self.config.saccade_df_path)
             else:
-                raise FileNotFoundError(f"Missing {sacc_path}")
+                raise FileNotFoundError(f"Missing {self.config.saccade_df_path}")
+
 
 
     def get_behavior_data(self, behavior_type: str, session_name=None, run_number=None, agent=None) -> pd.DataFrame:

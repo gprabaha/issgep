@@ -157,6 +157,121 @@ def get_roi_file_path(config, session_date: str, run_number: str) -> Path:
     filename = config.file_pattern.format(session_date=session_date, run_number=run_number)
     return config.roi_dir / filename
 
+
+# ----------------------
+# Fixation jobs
+# ----------------------
+
+def get_fixation_temp_dir(processed_data_dir: Path) -> Path:
+    """
+    Returns the path to the temporary directory used to store intermediate fixation and saccade job results.
+    Creates the directory if it doesn't exist.
+
+    Args:
+        processed_data_dir (Path): Base directory where processed data is stored.
+
+    Returns:
+        Path: Path to the 'temp' subdirectory.
+    """
+    temp_dir = Path(processed_data_dir) / "temp"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return temp_dir
+
+
+def get_job_file_path(project_root: Path, job_file_name: str) -> Path:
+    """
+    Returns the full path to the job array file inside the 'jobs/scripts' folder.
+    Ensures the folder exists.
+
+    Args:
+        project_root (Path): Root of the project.
+        job_file_name (str): Filename of the job array file (e.g., 'fixation_job_array.txt').
+
+    Returns:
+        Path: Full path to the job array file.
+    """
+    jobs_dir = project_root / "jobs" / "scripts"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    return jobs_dir / job_file_name
+
+
+def get_job_script_path(project_root: Path, relative_script_path: str) -> Path:
+    """
+    Resolves the full path to the Python script used in job submission.
+
+    Args:
+        project_root (Path): Root of the project.
+        relative_script_path (str): Relative path to the Python script.
+
+    Returns:
+        Path: Full path to the Python script.
+    """
+    return project_root / relative_script_path
+
+
+def get_fixation_job_result_path(temp_dir: Path, session: str, run: str, agent: str) -> Path:
+    """
+    Constructs the path to a temporary fixation result file for a given session/run/agent.
+
+    Args:
+        temp_dir (Path): Directory where temporary results are stored.
+        session (str): Session name.
+        run (str): Run number or ID.
+        agent (str): Agent name (e.g., 'm1' or 'm2').
+
+    Returns:
+        Path: Path to the fixation .pkl file.
+    """
+    return temp_dir / f"fixations_{session}_{run}_{agent}.pkl"
+
+
+def get_saccade_job_result_path(temp_dir: Path, session: str, run: str, agent: str) -> Path:
+    """
+    Constructs the path to a temporary saccade result file for a given session/run/agent.
+
+    Args:
+        temp_dir (Path): Directory where temporary results are stored.
+        session (str): Session name.
+        run (str): Run number or ID.
+        agent (str): Agent name (e.g., 'm1' or 'm2').
+
+    Returns:
+        Path: Path to the saccade .pkl file.
+    """
+    return temp_dir / f"saccades_{session}_{run}_{agent}.pkl"
+
+
+def get_fixation_df_path(processed_data_dir: Path) -> Path:
+    """
+    Returns the path to the final saved fixation dataframe.
+
+    Args:
+        processed_data_dir (Path): Base directory where processed data is stored.
+
+    Returns:
+        Path: Path to 'fixations.pkl'.
+    """
+    processed_data_dir = Path(processed_data_dir)
+    processed_data_dir.mkdir(parents=True, exist_ok=True)
+    return processed_data_dir / "fixations.pkl"
+
+
+def get_saccade_df_path(processed_data_dir: Path) -> Path:
+    """
+    Returns the path to the final saved saccade dataframe.
+
+    Args:
+        processed_data_dir (Path): Base directory where processed data is stored.
+
+    Returns:
+        Path: Path to 'saccades.pkl'.
+    """
+    processed_data_dir = Path(processed_data_dir)
+    processed_data_dir.mkdir(parents=True, exist_ok=True)
+    return processed_data_dir / "saccades.pkl"
+
+
+
 # --------------
 # General
 # --------------
