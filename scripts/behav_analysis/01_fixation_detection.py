@@ -15,7 +15,6 @@ It also handles:
 
 import logging
 import argparse
-import pdb
 
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.data.gaze_data import GazeData
