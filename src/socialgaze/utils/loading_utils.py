@@ -37,7 +37,6 @@ def load_df_from_pkl(filepath: str) -> pd.DataFrame:
     -------
     - Loaded dataframe or None
     """
-    logger.info(f"Loading pickled dataframe from {filepath}")
     return pd.read_pickle(filepath) if filepath.exists() else None
 
 def load_mat_from_path(path) -> dict:

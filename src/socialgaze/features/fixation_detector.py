@@ -1,13 +1,15 @@
 # src/socialgaze/features/fixation_detector.py
 
+import pdb
+
 import logging
 from typing import List, Tuple, Optional
+from pathlib import Path
 import random
+from multiprocessing import Pool
+import shutil
 import numpy as np
 import pandas as pd
-from multiprocessing import Pool
-from pathlib import Path
-import shutil
 
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.data.gaze_data import GazeData
@@ -73,7 +75,7 @@ class FixationDetector:
     def _load_fixation_and_saccade_results(self, tasks: List[Tuple[str, str, str]]):
         temp_dir = Path(self.config.processed_data_dir) / "temp"
         fix_dfs, sacc_dfs = [], []
-
+        logger.info("Loading fixation and saccade dfs exported from array jobs")
         for session, run, agent in tasks:
             fix_path = temp_dir / f"fixations_{session}_{run}_{agent}.pkl"
             sacc_path = temp_dir / f"saccades_{session}_{run}_{agent}.pkl"
@@ -132,6 +134,10 @@ class FixationDetector:
         temp_dir.mkdir(parents=True, exist_ok=True)
         fixation_df = _build_event_df(all_fix_start_stops, session_name, run_number, agent)
         saccade_df = _build_event_df(all_sacc_start_stops, session_name, run_number, agent)
+        logger.info("Head of detected fixation df:")
+        logger.info(fixation_df.head())
+        logger.info("Head of detected saccade df:")
+        logger.info(saccade_df.head())
         save_df_to_pkl(fixation_df, temp_dir / f"fixations_{session_name}_{run_number}_{agent}.pkl")
         save_df_to_pkl(saccade_df, temp_dir / f"saccades_{session_name}_{run_number}_{agent}.pkl")
 
@@ -170,9 +176,124 @@ class FixationDetector:
             df = df[df["run_number"] == run_number]
         if agent:
             df = df[df["agent"] == agent]
-        return df[df["agent"] == agent]
         return df
 
+
+    def update_fixation_locations(self):
+        """
+        Annotates each fixation event with the ROI location label, based on the average
+        x and y position of the fixation interval. Assumes fixation data is stored
+        in `self.fixations`, and that gaze and ROI data can be fetched via `self.gaze_data.get_data`.
+
+        This function will:
+            - Load fixation data from disk if not already loaded.
+            - Group by (session_name, run_number, agent).
+            - For each group, retrieve gaze and ROI data.
+            - For each fixation (start, stop) in the group, compute mean x and y gaze coordinates.
+            - Use `_find_matching_rois()` to determine ROI label for that point.
+            - Store a list of ROI labels in the "location" column of the group row.
+        """
+        logger.info("Updating locations of fixations in self.fixations")
+        if self.fixations.empty:
+            logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
+            self.load_dataframes("fixations")
+        self.fixations["location"] = None
+
+        grouped = self.fixations.groupby(["session_name", "run_number", "agent"])
+        for idx, ((session, run, agent), group) in enumerate(grouped):
+            if idx % 100 == 0:
+                logger.info("Processing fixation group %d / %d", idx, len(grouped))
+
+            if len(group) != 1:
+                logger.warning("Expected 1 row for %s-%s-%s but found %d", session, run, agent, len(group))
+                continue
+
+            pos_df = self.gaze_data.get_data("positions", session_name=session, run_number=run, agent=agent)
+            roi_df = self.gaze_data.get_data("roi_vertices", session_name=session, run_number=run, agent=agent)
+
+            if pos_df is None or pos_df.empty or roi_df is None or roi_df.empty:
+                logger.warning("Missing gaze or ROI data for %s-%s-%s", session, run, agent)
+                continue
+
+            x = np.array(pos_df.iloc[0]["x"])
+            y = np.array(pos_df.iloc[0]["y"])
+            roi_rects = roi_df[["roi_name", "x_min", "y_min", "x_max", "y_max"]]
+
+            row = group.iloc[0]
+            starts = row["starts"]
+            stops = row["stops"]
+            locations = []
+
+            for start, stop in zip(starts, stops):
+                mean_x = np.mean(x[start:stop + 1])
+                mean_y = np.mean(y[start:stop + 1])
+                location = _find_matching_rois((mean_x, mean_y), roi_rects)
+                locations.append(location)
+
+            self.fixations.at[group.index[0], "location"] = locations
+
+
+    def update_saccade_from_to(self):
+        """
+        Annotates each saccade event with the 'from' and 'to' ROI labels. The start and stop 
+        gaze positions of the saccade are used to determine which ROIs they land in.
+
+        This function will:
+            - Load saccade data from disk if not already loaded.
+            - Group by (session_name, run_number, agent).
+            - For each group, retrieve gaze and ROI data.
+            - For each saccade (start, stop) in the group:
+                - Map start position to 'from' ROI and stop position to 'to' ROI.
+            - Store the list of ROI labels in the corresponding 'from' and 'to' columns.
+        """
+        logger.info("Updating from and to locations of saccades in self.saccades")
+        if self.saccades.empty:
+            logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
+            self.load_dataframes("saccades")
+        self.saccades["from"] = None
+        self.saccades["to"] = None
+
+        grouped = self.saccades.groupby(["session_name", "run_number", "agent"])
+        for idx, ((session, run, agent), group) in enumerate(grouped):
+            if idx % 50 == 0:
+                logger.info("Processing saccade group %d / %d", idx, len(grouped))
+
+            if len(group) != 1:
+                logger.warning("Expected 1 row for %s-%s-%s but found %d", session, run, agent, len(group))
+                continue
+
+            pos_df = self.gaze_data.get_data("positions", session_name=session, run_number=run, agent=agent)
+            roi_df = self.gaze_data.get_data("roi_vertices", session_name=session, run_number=run, agent=agent)
+
+            if pos_df is None or pos_df.empty or roi_df is None or roi_df.empty:
+                logger.warning("Missing gaze or ROI data for %s-%s-%s", session, run, agent)
+                continue
+
+            x = np.array(pos_df.iloc[0]["x"])
+            y = np.array(pos_df.iloc[0]["y"])
+            roi_rects = roi_df[["roi_name", "x_min", "y_min", "x_max", "y_max"]]
+
+            row = group.iloc[0]
+            starts = row["starts"]
+            stops = row["stops"]
+            from_rois = []
+            to_rois = []
+
+            for start, stop in zip(starts, stops):
+                from_pos = (x[start], y[start])
+                to_pos = (x[stop], y[stop])
+                from_rois.append(_find_matching_rois(from_pos, roi_rects))
+                to_rois.append(_find_matching_rois(to_pos, roi_rects))
+
+            self.saccades.at[group.index[0], "from"] = from_rois
+            self.saccades.at[group.index[0], "to"] = to_rois
+
+        pdb.set_trace()
+
+
+
+
+# Fixation and saccade detection functions
 
 def _extract_non_nan_chunks(positions: np.ndarray) -> Tuple[List[np.ndarray], List[int]]:
     non_nan_chunks = []
@@ -200,9 +321,19 @@ def _detect_fix_sacc_in_chunk(args: Tuple[np.ndarray, int]) -> Tuple[np.ndarray,
 
 def _build_event_df(events: np.ndarray, session_name: str, run_number: str, agent: str) -> pd.DataFrame:
     return pd.DataFrame({
-        "session_name": session_name,
-        "run_number": run_number,
-        "agent": agent,
-        "starts": events[:, 0],
-        "stops": events[:, 1]
+        "session_name": [session_name],
+        "run_number": [run_number],
+        "agent": [agent],
+        "starts": [events[:, 0]],
+        "stops": [events[:, 1]]
     })
+
+
+# Fixation and saccade labeling functions
+
+def _find_matching_rois(position: np.ndarray, roi_df: pd.DataFrame) -> List[str]:
+    matching_rois = []
+    for _, roi in roi_df.iterrows():
+        if roi["x_min"] <= position[0] <= roi["x_max"] and roi["y_min"] <= position[1] <= roi["y_max"]:
+            matching_rois.append(roi["roi_name"])
+    return matching_rois if matching_rois else ["out_of_roi"]

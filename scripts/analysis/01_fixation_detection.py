@@ -32,9 +32,17 @@ def main():
             config=fixation_config
         )
     else:
-        logger.info("Running full fixation detection job submission...")
-        detector.detect_fixations_through_hpc_jobs(fixation_config)
-        detector.save_dataframes()
+        if fixation_config.detect_fixations_again:
+            logger.info("Running full fixation detection job submission...")
+            detector.detect_fixations_through_hpc_jobs(fixation_config)
+            # detector.update_fixation_locations()
+            # detector.update_saccade_from_to()
+            detector.save_dataframes()
+        else:
+            detector.load_dataframes()
+            detector.update_fixation_locations()
+            detector.update_saccade_from_to()
+            detector.save_dataframes()
 
 if __name__ == "__main__":
     main()
