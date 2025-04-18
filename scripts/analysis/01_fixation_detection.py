@@ -1,5 +1,7 @@
 # scripts/analysis/01_fixation_detection.py
 
+import pdb
+
 import logging
 import argparse
 
@@ -35,13 +37,15 @@ def main():
         if fixation_config.detect_fixations_again:
             logger.info("Running full fixation detection job submission...")
             detector.detect_fixations_through_hpc_jobs(fixation_config)
-            # detector.update_fixation_locations()
-            # detector.update_saccade_from_to()
+            detector.update_fixation_locations()
+            detector.update_saccade_from_to()
+            detector.reconcile_fixation_saccade_mismatches()
             detector.save_dataframes()
         else:
             detector.load_dataframes()
             detector.update_fixation_locations()
             detector.update_saccade_from_to()
+            detector.reconcile_fixation_saccade_mismatches()
             detector.save_dataframes()
 
 if __name__ == "__main__":
