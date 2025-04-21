@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Dict, Optional, List, Union
-from socialgaze.config.base_config import BaseConfig
 
 # --------------
 # Config
@@ -159,14 +158,14 @@ def get_roi_file_path(config, session_date: str, run_number: str) -> Path:
     return config.roi_dir / filename
 
 
-def get_spike_times_mat_path(config: BaseConfig) -> Path:
+def get_spike_times_mat_path(config) -> Path:
     """
     Returns the full path to the spike times .mat file.
     """
     return config.data_dir / "unit_spiketimes.mat"
 
 
-def get_spike_df_pkl_path(config: BaseConfig) -> Path:
+def get_spike_df_pkl_path(config) -> Path:
     """
     Returns the path to the saved spike dataframe as .pkl.
     """
