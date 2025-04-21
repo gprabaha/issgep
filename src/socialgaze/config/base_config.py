@@ -103,7 +103,9 @@ class BaseConfig:
                 ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
 
                 self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
-
+            
+            self.spiketimes_mat_path =  get_spike_times_mat_path(self)
+            self.spiketimes_df_path =  get_spike_df_pkl_path(self)
             self.save_to_file(self.config_path)
             logger.info(f"Base config generated and saved to {self.config_path}")
 

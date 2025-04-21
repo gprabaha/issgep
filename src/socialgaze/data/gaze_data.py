@@ -122,10 +122,11 @@ class GazeData:
             process_func = registry_entry["process_func"]
             agent_specific = registry_entry["agent_specific"]
             logger.info(f"Loading .mat data for: {data_type}")
+            loaded_data = []
             for session_name in self.config.session_names:
                 if session_filter and session_name not in session_filter:
                     continue
-
+                
                 for run_number in self.config.runs_by_session.get(session_name, []):
                     run_number = str(run_number)
                     if run_filter and run_number not in run_filter:
@@ -137,13 +138,14 @@ class GazeData:
                             path = path_func(self.config, session_name, run_number)
                             df = process_func(path, session_name, run_number, agent)
                             if df is not None:
-                                self.raw_data[data_type].append(df)
+                                loaded_data.append(df)
                     else:
                         path = path_func(self.config, session_name, run_number)
                         df = process_func(path, session_name, run_number)
                         if df is not None:
-                            self.raw_data[data_type].append(df)
-            self.raw_data[data_type] = pd.concat(self.raw_data[data_type], ignore_index=True)
+                            loaded_data.append(df)
+            if loaded_data:
+                self.raw_data[data_type] = pd.concat(loaded_data, ignore_index=True)
 
     # Load and save generated dataframes
     
