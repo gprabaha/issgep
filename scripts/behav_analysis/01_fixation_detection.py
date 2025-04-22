@@ -78,19 +78,15 @@ def main():
         detector.update_saccade_from_to()
         logger.info("Reconciling mismatched fixation/saccade labels...")
         detector.reconcile_fixation_saccade_label_mismatches()
-        logger.info("Fixations df head:")
-        logger.info(detector.fixations.head())
-        logger.info("Saccades df head:")
-        logger.info(detector.saccades.head())
         # Save final results
         detector.save_dataframes()
         logger.info("Final dataframes saved successfully.")
     else:
         logger.info("Fixations and saccades already detected and labelled...")
-        logger.info("Fixations df head:")
-        logger.info(detector.fixations.head())
-        logger.info("Saccades df head:")
-        logger.info(detector.saccades.head())
+    logger.info("Fixations df head:")
+    logger.info(detector.fixations.head())
+    logger.info("Saccades df head:")
+    logger.info(detector.saccades.head())
     logger.info("Done.")
 
 

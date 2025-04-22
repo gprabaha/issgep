@@ -31,7 +31,7 @@ class FixationDetector:
         self.config = config
         self.fixations = pd.DataFrame()
         self.saccades = pd.DataFrame()
-
+        self.fixation_binary_vectors = pd.DataFrame()
 
     def detect_fixations_through_hpc_jobs(self):
         logger.info("\n ** Generating fixation and saccade detection jobs...")
@@ -134,10 +134,21 @@ class FixationDetector:
 
     def save_dataframes(self):
         """
-        Saves fixations and saccades DataFrames to their configured paths.
+        Saves fixations and saccades DataFrames to their configured paths,
+        if they exist and are not empty.
         """
-        save_df_to_pkl(self.fixations, self.config.fixation_df_path)
-        save_df_to_pkl(self.saccades, self.config.saccade_df_path)
+        if self.fixations is not None and not self.fixations.empty:
+            save_df_to_pkl(self.fixations, self.config.fixation_df_path)
+            logger.info(f"Saved fixation DataFrame to {self.config.fixation_df_path}")
+        else:
+            logger.warning("Fixation DataFrame is None or empty — skipping save.")
+
+        if self.saccades is not None and not self.saccades.empty:
+            save_df_to_pkl(self.saccades, self.config.saccade_df_path)
+            logger.info(f"Saved saccade DataFrame to {self.config.saccade_df_path}")
+        else:
+            logger.warning("Saccade DataFrame is None or empty — skipping save.")
+
 
 
     def load_dataframes(self, behavior_type: Optional[str] = None):
@@ -296,6 +307,22 @@ class FixationDetector:
                 changes_made = self._align_fixation_saccade_pair_for_key(key, fixation_groups, saccade_groups)
 
 
+    def add_fixation_category_column(self):
+        """
+        Adds a 'category' column to the fixations DataFrame with values: 'face', 'object', or 'out_of_roi'.
+        """
+        logger.info("\n ** Categorizing fixations as 'face', 'object', or 'out_of_roi'")
+        if self.fixations is None or self.fixations.empty:
+            logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
+            self.load_dataframes("fixations")
+
+        if "location" not in self.fixations.columns:
+            logger.info("Fixation locations not found. Running update_fixation_locations().")
+            self.update_fixation_locations()
+
+        self.fixations["category"] = self.fixations["location"].apply(_categorize_fixations)
+
+
     def _ensure_fix_and_saccade_data_is_loaded_and_labelled(self):
         if self.fixations is None or self.fixations.empty:
             logger.info("Fixation dataframe not loaded. Attempting to load from disk.")
@@ -423,3 +450,22 @@ def _merge_and_sort_gaze_events(fix_starts, fix_stops, sacc_starts, sacc_stops):
     events += [(s, e, "saccade", i) for i, (s, e) in enumerate(zip(sacc_starts, sacc_stops))]
     events.sort(key=lambda tup: tup[0])
     return events
+
+
+def _categorize_fixations(location_list):
+    """
+    Takes a list of ROI lists (one per fixation) and returns a list of single-category labels
+    ('face', 'object', or 'out_of_roi') for each fixation, mutually exclusive.
+    """
+    face_rois = {"face", "mouth", "eyes", "eyes_nf"}
+    object_rois = {"left_nonsocial_object", "right_nonsocial_object"}
+    categorized = []
+    for roi_list in location_list:
+        roi_set = set(roi_list)
+        if roi_set & face_rois:
+            categorized.append("face")
+        elif roi_set & object_rois:
+            categorized.append("object")
+        else:
+            categorized.append("out_of_roi")
+    return categorized

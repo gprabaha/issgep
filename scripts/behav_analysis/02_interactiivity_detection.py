@@ -19,3 +19,14 @@ def main():
     logger.info("Initialized GazeData.")
     detector = FixationDetector(gaze_data=gaze_data, config=fixation_config)
     logger.info("Initialized FixationDetector.")
+    detector.load_dataframes()
+    logger.info("Loaded fixation and saccade dataframes.")
+    detector.add_fixation_category_column()
+    logger.info("Fixations df head:")
+    logger.info(detector.fixations.head())
+    detector.save_dataframes()
+    
+    
+    
+if __name__ == "__main__":
+    main()
