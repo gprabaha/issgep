@@ -222,7 +222,7 @@ class GazeData:
                 run_number: Optional[str] = None,
                 agent: Optional[str] = None,
                 load_if_available: bool = True,
-                fallback_to_mat: bool = True) -> Optional[pd.DataFrame]:
+                fallback_to_mat: bool = False) -> Optional[pd.DataFrame]:
         """
         Retrieves a behavioral data type (e.g., 'positions'), with optional filtering.
 
@@ -257,6 +257,7 @@ class GazeData:
                 agent_filter=agent if agent else None
             )
             df = getattr(self, data_type, None)
+        
         if df is None:
             logger.warning(f"{data_type} not available in memory.")
             return None
@@ -322,13 +323,11 @@ class GazeData:
     def get_run_lengths(self) -> pd.DataFrame:
         """
         Returns the run_lengths DataFrame.
-
         Loads from disk or computes from neural timeline if necessary.
         Raises error if neither is available.
         """
         if self.run_lengths is not None:
             return self.run_lengths
-
         # Attempt to load from disk
         path = self.config.run_length_df_path
         if path.exists():
@@ -338,12 +337,10 @@ class GazeData:
                 return self.run_lengths
             except Exception as e:
                 logger.warning(f"Failed to load run_lengths from disk: {e}")
-
         # Attempt to compute from raw_data
-       if self.neural_timeline is None:
+        if self.neural_timeline is None:
             self.run_lengths = self._compute_run_lengths_from_timeline()
             return self.run_lengths
-
         raise RuntimeError("Cannot retrieve run lengths — no timeline data in memory and no saved .pkl found.")
 
 

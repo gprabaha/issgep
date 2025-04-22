@@ -1,8 +1,10 @@
 # src/socialgaze/utils/discovery_utils.py
 
 import re
+import os
 from typing import List, Dict, Tuple, Callable, Any
 from pathlib import Path
+from multiprocessing import cpu_count
 import logging
 
 logger = logging.getLogger(__name__)
@@ -108,3 +110,11 @@ def filter_sessions_with_ephys(
             logger.info(f"Discarding session {session_name} — no ephys data found.")
 
     return filtered_session_names, filtered_runs_by_session
+
+def get_num_available_cpus(is_cluster: bool) -> int:
+    """Returns the number of CPUs available for parallel processing."""
+    if is_cluster:
+        slurm_cpus = os.getenv("SLURM_CPUS_PER_TASK")
+        return int(slurm_cpus) if slurm_cpus else 1
+    else:
+        return cpu_count()

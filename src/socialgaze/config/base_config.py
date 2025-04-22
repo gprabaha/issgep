@@ -13,6 +13,13 @@ from socialgaze.utils.path_utils import (
     determine_root_data_dir,
     get_project_root,
     get_default_config_folder,
+    get_position_df_pkl_path,
+    get_pupil_df_pkl_path,
+    get_roi_df_pkl_path,
+    get_time_df_pkl_path,
+    get_run_lengths_df_pkl_path,
+    get_spike_times_mat_path,
+    get_spike_df_pkl_path,
     get_default_data_paths,
     get_raw_data_directories,
     get_pupil_file_path,
@@ -28,6 +35,7 @@ from socialgaze.utils.discovery_utils import (
 )
 from socialgaze.utils.saving_utils import save_config_to_json
 from socialgaze.utils.conversion_utils import object_to_dict, assign_dict_attributes_to_object
+from socialgaze.utils.discovery_utils import get_num_available_cpus
 
 import pdb
 
@@ -78,9 +86,9 @@ class BaseConfig:
         self.roi_vertices_df_path = get_roi_df_pkl_path(self)
         self.neural_timeline_df_path = get_time_df_pkl_path(self)
         self.run_length_df_path = get_run_lengths_df_pkl_path(self)
-
-        self.spiketimes_mat_path = get_spike_times_mat_path(self)
         self.spiketimes_df_path = get_spike_df_pkl_path(self)
+
+        self.num_cpus = get_num_available_cpus(self.is_cluster)
 
         self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
         self.session_names: List[str] = []
@@ -111,9 +119,9 @@ class BaseConfig:
 
                 ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
                 ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
-
                 self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
-
+                self.spiketimes_mat_path = get_spike_times_mat_path(self)
+                
             self.save_to_file(self.config_path)
             logger.info(f"Base config generated and saved to {self.config_path}")
 

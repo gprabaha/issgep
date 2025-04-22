@@ -76,21 +76,23 @@ def get_default_data_paths(project_root: Path) -> Dict[str, Path]:
     }
 
 
-def get_position_df_pkl_path(config: BaseConfig) -> Path:
+def get_position_df_pkl_path(config) -> Path:
     return config.processed_data_dir / "positions.pkl"
 
-def get_pupil_df_pkl_path(config: BaseConfig) -> Path:
+def get_pupil_df_pkl_path(config) -> Path:
     return config.processed_data_dir / "pupil.pkl"
 
-def get_roi_df_pkl_path(config: BaseConfig) -> Path:
+def get_roi_df_pkl_path(config) -> Path:
     return config.processed_data_dir / "roi_vertices.pkl"
 
-def get_time_df_pkl_path(config: BaseConfig) -> Path:
+def get_time_df_pkl_path(config) -> Path:
     return config.processed_data_dir / "neural_timeline.pkl"
 
-def get_run_lengths_df_pkl_path(config: BaseConfig) -> Path:
+def get_run_lengths_df_pkl_path(config) -> Path:
     return config.processed_data_dir / "run_lengths.pkl"
 
+def get_fix_binary_vec_df_path(config) -> Path:
+    return config.processed_data_dir / "fixation_binary_vectors.pkl"
 
 
 def get_raw_data_directories(data_root: Path) -> Dict[str, Path]:
@@ -335,6 +337,10 @@ def get_saccade_df_path(processed_data_dir: Path) -> Path:
     processed_data_dir.mkdir(parents=True, exist_ok=True)
     return processed_data_dir / "saccades.pkl"
 
+
+
+def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
+    return config.processed_data_dir / f"mutual_fixation_density_{fixation_type}.pkl"
 
 
 # --------------

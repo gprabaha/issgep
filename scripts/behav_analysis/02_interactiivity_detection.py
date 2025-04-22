@@ -1,42 +1,33 @@
 # scripts/behav_analysis/02_interactivity_detection.py
 
 import logging
-import argparse
-
-from socialgaze.config.fixation_config import FixationConfig
-from socialgaze.data.gaze_data import GazeData
-from socialgaze.features.fixation_detector import FixationDetector
+from socialgaze.config.interactivity_config import InteractivityConfig
+from socialgaze.utils.loading_utils import load_df_from_pkl
+from socialgaze.features.interactivity_detector import InteractivityDetector
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def main():
+    # Initialize config
+    config = InteractivityConfig()
+    logger.info("Loaded InteractivityConfig.")
 
-    # Load configuration and data
-    fixation_config = FixationConfig()
-    logger.info("Loaded FixationConfig.")
+    # Load binary fixation vectors
+    logger.info("Loading fixation binary vector dataframe from %s", config.fix_binary_vec_df_path)
+    fix_binary_vector_df = load_df_from_pkl(config.fix_binary_vec_df_path)
 
-    gaze_data = GazeData(config=fixation_config)
-    logger.info("Initialized GazeData.")
+    # Initialize and run detector
+    detector = InteractivityDetector(fix_binary_vector_df=fix_binary_vector_df, config=config)
+    logger.info("Running mutual fixation density analysis...")
+    detector.run(True)
+    logger.info("Interactivity detection complete.")
 
-    detector = FixationDetector(gaze_data=gaze_data, config=fixation_config)
-    logger.info("Initialized FixationDetector.")
+    # Show preview
+    print("\n=== Head of Mutual Fixation Density DataFrame ===")
+    print(detector.get_density().head())
 
-    detector.load_dataframes()
-    logger.info("Loaded fixation and saccade dataframes.")
 
-    detector.add_fixation_category_column()
-    logger.info("Added fixation category column.")
-
-    detector.generate_fixation_binary_vectors()
-    logger.info("Generated fixation binary vectors.")
-    
-    detector.save_fixation_binary_vectors()
-    logger.info("Fixations df head:")
-    logger.info(detector.fixations.head())
-    detector.save_dataframes()
-
-    
-    
 if __name__ == "__main__":
     main()

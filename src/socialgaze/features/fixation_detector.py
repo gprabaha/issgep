@@ -384,7 +384,7 @@ class FixationDetector:
         Saves the fixation_binary_vectors DataFrame to disk if it exists and is not empty.
         """
         if self.fixation_binary_vectors is not None and not self.fixation_binary_vectors.empty:
-            path = self.config.processed_data_dir / "fixation_binary_vectors.pkl"
+            path = self.config.fix_binary_vec_df_path
             save_df_to_pkl(self.fixation_binary_vectors, path)
             logger.info(f"Saved fixation binary vectors to {path}")
         else:
@@ -395,7 +395,7 @@ class FixationDetector:
         """
         Loads the fixation_binary_vectors DataFrame from disk if available.
         """
-        path = self.config.processed_data_dir / "fixation_binary_vectors.pkl"
+        path = self.config.fix_binary_vec_df_path
         if path.exists():
             self.fixation_binary_vectors = load_df_from_pkl(path)
             logger.info(f"Loaded fixation binary vectors from {path}")

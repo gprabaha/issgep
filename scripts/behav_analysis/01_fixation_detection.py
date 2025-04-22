@@ -56,7 +56,6 @@ def main():
             run_number=args.run,
             agent=args.agent
         )
-        detector.save_dataframes()
         logger.info("Saved results for single-run.")
         return
 
@@ -78,15 +77,22 @@ def main():
         detector.update_saccade_from_to()
         logger.info("Reconciling mismatched fixation/saccade labels...")
         detector.reconcile_fixation_saccade_label_mismatches()
-        # Save final results
-        detector.save_dataframes()
-        logger.info("Final dataframes saved successfully.")
     else:
         logger.info("Fixations and saccades already detected and labelled...")
+    logger.info("Adding fixation category column...")
+    detector.add_fixation_category_column()
+    detector.save_dataframes()
+    logger.info("Final dataframes saved successfully.")
+    logger.info("Generating fixation binary vectors...")
+    detector.generate_fixation_binary_vectors()
+    logger.info("Fixation binary vectors generated.")
+    detector.save_fixation_binary_vectors()
     logger.info("Fixations df head:")
     logger.info(detector.fixations.head())
     logger.info("Saccades df head:")
     logger.info(detector.saccades.head())
+    logger.info("Fixation binary vector df head:")
+    logger.info(detector.fixation_binary_vectors.head())
     logger.info("Done.")
 
 
