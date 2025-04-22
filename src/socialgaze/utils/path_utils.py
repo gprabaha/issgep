@@ -76,6 +76,23 @@ def get_default_data_paths(project_root: Path) -> Dict[str, Path]:
     }
 
 
+def get_position_df_pkl_path(config: BaseConfig) -> Path:
+    return config.processed_data_dir / "positions.pkl"
+
+def get_pupil_df_pkl_path(config: BaseConfig) -> Path:
+    return config.processed_data_dir / "pupil.pkl"
+
+def get_roi_df_pkl_path(config: BaseConfig) -> Path:
+    return config.processed_data_dir / "roi_vertices.pkl"
+
+def get_time_df_pkl_path(config: BaseConfig) -> Path:
+    return config.processed_data_dir / "neural_timeline.pkl"
+
+def get_run_lengths_df_pkl_path(config: BaseConfig) -> Path:
+    return config.processed_data_dir / "run_lengths.pkl"
+
+
+
 def get_raw_data_directories(data_root: Path) -> Dict[str, Path]:
     """
     Returns standardized subdirectories for raw eyetracking data under the given root.

@@ -72,6 +72,16 @@ class BaseConfig:
         self.output_dir = paths["outputs"]
         self.plots_dir = paths["plots"]
 
+        # Set all processed dataframe paths via path_utils
+        self.positions_df_path = get_position_df_pkl_path(self)
+        self.pupil_df_path = get_pupil_df_pkl_path(self)
+        self.roi_vertices_df_path = get_roi_df_pkl_path(self)
+        self.neural_timeline_df_path = get_time_df_pkl_path(self)
+        self.run_length_df_path = get_run_lengths_df_pkl_path(self)
+
+        self.spiketimes_mat_path = get_spike_times_mat_path(self)
+        self.spiketimes_df_path = get_spike_df_pkl_path(self)
+
         self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
         self.session_names: List[str] = []
         self.runs_by_session: Dict[str, List[str]] = {}
@@ -103,11 +113,10 @@ class BaseConfig:
                 ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
 
                 self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
-            
-            self.spiketimes_mat_path =  get_spike_times_mat_path(self)
-            self.spiketimes_df_path =  get_spike_df_pkl_path(self)
+
             self.save_to_file(self.config_path)
             logger.info(f"Base config generated and saved to {self.config_path}")
+
 
 
     # -----------------------------

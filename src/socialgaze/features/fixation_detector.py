@@ -323,6 +323,86 @@ class FixationDetector:
         self.fixations["category"] = self.fixations["location"].apply(_categorize_fixations)
 
 
+    def generate_fixation_binary_vectors(self, return_df: bool = False) -> Optional[pd.DataFrame]:
+        """
+        Generates binary vectors for each fixation category per run and agent.
+        Stores the result in self.fixation_binary_vectors and optionally returns it.
+
+        Args:
+            return_df (bool): If True, returns the binary vector DataFrame.
+        Returns:
+            Optional[pd.DataFrame]: Long-format DataFrame of binary vectors (if return_df=True).
+        """
+        logger.info("\n ** Generating fixation binary vectors...")
+
+        if self.fixations is None or self.fixations.empty:
+            logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
+            self.load_dataframes("fixations")
+
+        if "category" not in self.fixations.columns:
+            logger.info("'category' column not found in fixations. Running add_fixation_category_column().")
+            self.add_fixation_category_column()
+
+        run_lengths_df = self.gaze_data.get_run_lengths()
+        vectors = []
+
+        grouped = self.fixations.groupby(["session_name", "run_number", "agent"])
+        for (session, run, agent), group in grouped:
+            row = group.iloc[0]
+            starts = row["starts"]
+            stops = row["stops"]
+            categories = row["category"]
+
+            run_len_match = run_lengths_df.query("session_name == @session and run_number == @run")
+            if run_len_match.empty:
+                logger.warning("Run length missing for %s-%s-%s — skipping", session, run, agent)
+                continue
+            run_length = int(run_len_match["run_length"].values[0])
+
+            unique_categories = sorted(set(categories))
+            binary_dict = {cat: np.zeros(run_length, dtype=int) for cat in unique_categories}
+
+            for (start, stop), cat in zip(zip(starts, stops), categories):
+                binary_dict[cat][start:stop + 1] = 1
+
+            for cat, vec in binary_dict.items():
+                vectors.append({
+                    "session_name": session,
+                    "run_number": run,
+                    "agent": agent,
+                    "fixation_type": cat,
+                    "binary_vector": vec
+                })
+        result_df = pd.DataFrame(vectors)
+        self.fixation_binary_vectors = result_df
+        logger.info("Fixation binary vector generation complete.")
+        if return_df:
+            return result_df
+
+    def save_fixation_binary_vectors(self):
+        """
+        Saves the fixation_binary_vectors DataFrame to disk if it exists and is not empty.
+        """
+        if self.fixation_binary_vectors is not None and not self.fixation_binary_vectors.empty:
+            path = self.config.processed_data_dir / "fixation_binary_vectors.pkl"
+            save_df_to_pkl(self.fixation_binary_vectors, path)
+            logger.info(f"Saved fixation binary vectors to {path}")
+        else:
+            logger.warning("Fixation binary vectors not available or empty — skipping save.")
+
+
+    def load_fixation_binary_vectors(self):
+        """
+        Loads the fixation_binary_vectors DataFrame from disk if available.
+        """
+        path = self.config.processed_data_dir / "fixation_binary_vectors.pkl"
+        if path.exists():
+            self.fixation_binary_vectors = load_df_from_pkl(path)
+            logger.info(f"Loaded fixation binary vectors from {path}")
+        else:
+            logger.warning(f"No fixation_binary_vectors.pkl found at {path}")
+
+
     def _ensure_fix_and_saccade_data_is_loaded_and_labelled(self):
         if self.fixations is None or self.fixations.empty:
             logger.info("Fixation dataframe not loaded. Attempting to load from disk.")

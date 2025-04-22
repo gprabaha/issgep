@@ -50,7 +50,10 @@ class GazeData:
         """
         self.config = config
         self.behav_data_loader_dict = self._generate_behav_data_loader_dict(config.behav_data_types)
-        self.raw_data: Dict[str, List[pd.DataFrame]] = defaultdict(list)
+        self.positions: Optional[pd.DataFrame] = None
+        self.pupil: Optional[pd.DataFrame] = None
+        self.roi_vertices: Optional[pd.DataFrame] = None
+        self.neural_timeline: Optional[pd.DataFrame] = None
         self.run_lengths: Optional[pd.DataFrame] = None
 
 
@@ -146,7 +149,7 @@ class GazeData:
                         if df is not None:
                             loaded_data.append(df)
             if loaded_data:
-                self.raw_data[data_type] = pd.concat(loaded_data, ignore_index=True)
+                setattr(self, data_type, pd.concat(loaded_data, ignore_index=True))
 
     # Load and save generated dataframes
     
@@ -157,18 +160,24 @@ class GazeData:
         Args:
             data_types (List[str], optional): Data types to load. If None, all are loaded.
         """
+        df_path_map = {
+            'positions': self.config.positions_df_path,
+            'pupil': self.config.pupil_df_path,
+            'roi_vertices': self.config.roi_vertices_df_path,
+            'neural_timeline': self.config.neural_timeline_df_path
+        }
         data_types = data_types if data_types else self.behav_data_loader_dict.keys()
         for data_type in data_types:
-            pkl_path = self.config.processed_data_dir / f"{data_type}.pkl"
+            pkl_path = df_path_map.get(data_type)
             if pkl_path.exists():
                 try:
                     df = load_df_from_pkl(pkl_path)
-                    self.raw_data[data_type] = df
+                    setattr(self, data_type, df)
                     logger.info(f"Loaded {data_type} from {pkl_path}")
                 except Exception as e:
                     logger.warning(f"Failed to load {data_type} from disk: {e}")
         # Also try loading run_lengths if present
-        run_lengths_path = self.config.processed_data_dir / "run_lengths.pkl"
+        run_lengths_path = self.config.run_length_df_path
         if run_lengths_path.exists():
             try:
                 self.run_lengths = load_df_from_pkl(run_lengths_path)
@@ -189,21 +198,24 @@ class GazeData:
         os.makedirs(output_dir, exist_ok=True)
 
         logger.info("Saving raw data dataframes...")
-        for data_type, df in self.raw_data.items():
+        data_path_map = {
+            'positions': (self.positions, self.config.positions_df_path),
+            'pupil': (self.pupil, self.config.pupil_df_path),
+            'roi_vertices': (self.roi_vertices, self.config.roi_vertices_df_path),
+            'neural_timeline': (self.neural_timeline, self.config.neural_timeline_df_path)
+        }
+        for data_type, (df, path) in data_path_map.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
-                out_path = output_dir / f"{data_type}.pkl"
-                save_df_to_pkl(df, out_path)
+                save_df_to_pkl(df, path)
 
         if self.run_lengths is not None and isinstance(self.run_lengths, pd.DataFrame):
-            run_lengths_path = output_dir / "run_lengths.pkl"
+            run_lengths_path = self.config.run_length_df_path
             save_df_to_pkl(self.run_lengths, run_lengths_path)
             logger.info("Saved run_lengths to disk.")
         logger.info("All raw data (and run lengths) saved as DataFrames.")
 
 
-
     # Fetch any part of the data
-
     def get_data(self,
                 data_type: str,
                 session_name: Optional[str] = None,
@@ -227,30 +239,28 @@ class GazeData:
         Returns:
             Optional[pd.DataFrame]: Filtered DataFrame, or None if not available.
         """
-        # Check if already loaded
-        if data_type not in self.raw_data or self.raw_data[data_type] is None:
-            # Try to load from saved .pkl
-            if load_if_available:
-                logger.info(f"{data_type} not in memory. Attempting to load from .pkl...")
-                self.load_from_saved_dataframes([data_type])
+        df = getattr(self, data_type, None)
+        # Try loading from .pkl if missing
+        if df is None and load_if_available:
+            logger.info(f"{data_type} not in memory. Attempting to load from .pkl...")
+            self.load_from_saved_dataframes([data_type])
+            df = getattr(self, data_type, None)
 
-            # Try to load from raw .mat
-            if (data_type not in self.raw_data or self.raw_data[data_type] is None) and fallback_to_mat:
-                logger.warning(f"{data_type} still not loaded. Attempting raw .mat load...")
-                logger.info(f"Loading {data_type} from raw .mat files for session={session_name}, run={run_number}, agent={agent}")
-                self.load_raw_data_from_mat_files(
-                    data_types=[data_type],
-                    session_filter=session_name,
-                    run_filter=run_number,
-                    agent_filter=agent if agent else None
-                )
-
-        # Final check: do we have the data now?
-        if data_type not in self.raw_data or self.raw_data[data_type] is None:
+        # Try loading from .mat if still missing
+        if df is None and fallback_to_mat:
+            logger.warning(f"{data_type} still not loaded. Attempting raw .mat load...")
+            logger.info(f"Loading {data_type} from raw .mat files for session={session_name}, run={run_number}, agent={agent}")
+            self.load_raw_data_from_mat_files(
+                data_types=[data_type],
+                session_filter=session_name,
+                run_filter=run_number,
+                agent_filter=agent if agent else None
+            )
+            df = getattr(self, data_type, None)
+        if df is None:
             logger.warning(f"{data_type} not available in memory.")
             return None
-
-        df = self.raw_data[data_type]
+        # Apply filters
         if session_name is not None:
             df = df[df["session_name"] == session_name]
         if run_number is not None:
@@ -265,11 +275,11 @@ class GazeData:
         Cleans timeline, position, and pupil data:
         - Removes invalid timeline entries (NaNs).
         - Interpolates missing values using sliding or linear interpolation.
-        - Overwrites self.raw_data with cleaned DataFrames.
+        - Updates self.positions, self.pupil, and self.neural_timeline with cleaned DataFrames.
         """
-        df_positions = self._get_or_load_data("positions")
-        df_pupils = self._get_or_load_data("pupil")
-        df_timeline = self._get_or_load_data("neural_timeline")
+        df_positions = self.get_data("positions")
+        df_pupils = self.get_data("pupil")
+        df_timeline = self.get_data("neural_timeline")
 
         cleaned_pos_rows = []
         cleaned_pupil_rows = []
@@ -303,9 +313,10 @@ class GazeData:
             if i % 50 == 0 or i == len(grouped):
                 logger.info(f"Processed {i}/{len(grouped)} groups...")
 
-        self.raw_data["neural_timeline"] = pd.concat(cleaned_timeline_rows, ignore_index=True)
-        self.raw_data["positions"] = pd.DataFrame(cleaned_pos_rows)
-        self.raw_data["pupil"] = pd.DataFrame(cleaned_pupil_rows)
+        self.neural_timeline = pd.concat(cleaned_timeline_rows, ignore_index=True)
+        self.positions = pd.DataFrame(cleaned_pos_rows)
+        self.pupil = pd.DataFrame(cleaned_pupil_rows)
+
 
 
     def get_run_lengths(self) -> pd.DataFrame:
@@ -319,7 +330,7 @@ class GazeData:
             return self.run_lengths
 
         # Attempt to load from disk
-        path = self.config.processed_data_dir / "run_lengths.pkl"
+        path = self.config.run_length_df_path
         if path.exists():
             try:
                 self.run_lengths = load_df_from_pkl(path)
@@ -329,7 +340,7 @@ class GazeData:
                 logger.warning(f"Failed to load run_lengths from disk: {e}")
 
         # Attempt to compute from raw_data
-        if 'neural_timeline' in self.raw_data and self.raw_data['neural_timeline'] is not None:
+       if self.neural_timeline is None:
             self.run_lengths = self._compute_run_lengths_from_timeline()
             return self.run_lengths
 
@@ -491,23 +502,6 @@ class GazeData:
     # 4. Pruning & interpolation helpers
     # -----------------------------
 
-    def _get_or_load_data(self, data_type: str) -> Optional[pd.DataFrame]:
-        """
-        Returns the requested data type from memory if available;
-        otherwise, attempts to load it using `get_data`.
-
-        This is a convenience wrapper to avoid repetitive checking
-        of `self.raw_data.get(...)` followed by a call to `get_data(...)`.
-
-        Args:
-            data_type (str): One of the behavioral data types (e.g., 'positions', 'pupil', etc.).
-
-        Returns:
-            Optional[pd.DataFrame]: The DataFrame for the requested data type, or None if unavailable.
-        """
-        df = self.raw_data.get(data_type)
-        return df if df is not None else self.get_data(data_type)
-
 
     def _prune_timeline_group(self, time_group):
         """
@@ -636,10 +630,10 @@ class GazeData:
         Returns:
             pd.DataFrame: DataFrame with columns ['session_name', 'run_number', 'run_length']
         """
-        if 'neural_timeline' not in self.raw_data or self.raw_data['neural_timeline'] is None:
+        if self.neural_timeline is None:
             raise ValueError("Neural timeline data not loaded. Cannot compute run lengths.")
         
-        df = self.raw_data['neural_timeline']
+        df = self.neural_timeline
         rows = []
         for (session, run), group in df.groupby(['session_name', 'run_number']):
             try:
