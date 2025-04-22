@@ -1,4 +1,4 @@
-# scripts/analysis/00_preprocessing.py
+# scripts/behav_analysis/00_preprocessing.py
 
 """
 Preprocesses all raw behavioral data by:
@@ -25,7 +25,10 @@ if __name__ == "__main__":
     logger.info("Step 2: Pruning and interpolating...")
     gaze_data.prune_and_interpolate()
 
-    logger.info("Step 3: Saving cleaned DataFrames...")
+    logger.info("Step 3: Storing the length of each run...")
+    gaze_data.get_run_lengths()
+
+    logger.info("Step 4: Saving cleaned DataFrames...")
     gaze_data.save_as_dataframes()
 
     logger.info("Done.")

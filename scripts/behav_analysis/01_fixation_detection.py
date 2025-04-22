@@ -1,4 +1,4 @@
-# scripts/analysis/01_fixation_detection.py
+# scripts/behav_analysis/01_fixation_detection.py
 
 """
 Script to detect fixations and saccades in eye-tracking data.

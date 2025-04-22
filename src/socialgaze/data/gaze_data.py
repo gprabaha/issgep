@@ -51,6 +51,7 @@ class GazeData:
         self.config = config
         self.behav_data_loader_dict = self._generate_behav_data_loader_dict(config.behav_data_types)
         self.raw_data: Dict[str, List[pd.DataFrame]] = defaultdict(list)
+        self.run_lengths: Optional[pd.DataFrame] = None
 
 
     def _generate_behav_data_loader_dict(self, behav_data_types: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -166,23 +167,39 @@ class GazeData:
                     logger.info(f"Loaded {data_type} from {pkl_path}")
                 except Exception as e:
                     logger.warning(f"Failed to load {data_type} from disk: {e}")
+        # Also try loading run_lengths if present
+        run_lengths_path = self.config.processed_data_dir / "run_lengths.pkl"
+        if run_lengths_path.exists():
+            try:
+                self.run_lengths = load_df_from_pkl(run_lengths_path)
+                logger.info("Loaded run_lengths from disk.")
+            except Exception as e:
+                logger.warning(f"Failed to load run_lengths.pkl: {e}")
+
 
 
     def save_as_dataframes(self, output_dir: Optional[Path] = None):
         """
-        Saves all in-memory DataFrames in self.raw_data to the specified output directory as .pkl files.
+        Saves all in-memory DataFrames in self.raw_data and run_lengths to the specified output directory as .pkl files.
 
         Args:
             output_dir (Optional[Path]): Directory to save the pickle files in. Defaults to self.config.processed_data_dir.
         """
         output_dir = output_dir or self.config.processed_data_dir
         os.makedirs(output_dir, exist_ok=True)
-        logger.info("Saving raw data dataframes")
+
+        logger.info("Saving raw data dataframes...")
         for data_type, df in self.raw_data.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
                 out_path = output_dir / f"{data_type}.pkl"
                 save_df_to_pkl(df, out_path)
-        logger.info("All raw data saved as DataFrames.")
+
+        if self.run_lengths is not None and isinstance(self.run_lengths, pd.DataFrame):
+            run_lengths_path = output_dir / "run_lengths.pkl"
+            save_df_to_pkl(self.run_lengths, run_lengths_path)
+            logger.info("Saved run_lengths to disk.")
+        logger.info("All raw data (and run lengths) saved as DataFrames.")
+
 
 
     # Fetch any part of the data
@@ -289,6 +306,35 @@ class GazeData:
         self.raw_data["neural_timeline"] = pd.concat(cleaned_timeline_rows, ignore_index=True)
         self.raw_data["positions"] = pd.DataFrame(cleaned_pos_rows)
         self.raw_data["pupil"] = pd.DataFrame(cleaned_pupil_rows)
+
+
+    def get_run_lengths(self) -> pd.DataFrame:
+        """
+        Returns the run_lengths DataFrame.
+
+        Loads from disk or computes from neural timeline if necessary.
+        Raises error if neither is available.
+        """
+        if self.run_lengths is not None:
+            return self.run_lengths
+
+        # Attempt to load from disk
+        path = self.config.processed_data_dir / "run_lengths.pkl"
+        if path.exists():
+            try:
+                self.run_lengths = load_df_from_pkl(path)
+                logger.info("Loaded run_lengths from disk.")
+                return self.run_lengths
+            except Exception as e:
+                logger.warning(f"Failed to load run_lengths from disk: {e}")
+
+        # Attempt to compute from raw_data
+        if 'neural_timeline' in self.raw_data and self.raw_data['neural_timeline'] is not None:
+            self.run_lengths = self._compute_run_lengths_from_timeline()
+            return self.run_lengths
+
+        raise RuntimeError("Cannot retrieve run lengths — no timeline data in memory and no saved .pkl found.")
+
 
     # -----------------------------
     # 3. MAT file internals
@@ -583,4 +629,29 @@ class GazeData:
         return pupil_row
 
 
+    def _compute_run_lengths_from_timeline(self) -> pd.DataFrame:
+        """
+        Computes the number of timepoints in each (session_name, run_number) based on the neural timeline.
+
+        Returns:
+            pd.DataFrame: DataFrame with columns ['session_name', 'run_number', 'run_length']
+        """
+        if 'neural_timeline' not in self.raw_data or self.raw_data['neural_timeline'] is None:
+            raise ValueError("Neural timeline data not loaded. Cannot compute run lengths.")
+        
+        df = self.raw_data['neural_timeline']
+        rows = []
+        for (session, run), group in df.groupby(['session_name', 'run_number']):
+            try:
+                timeline = group.iloc[0]['neural_timeline']
+                length = len(timeline) if timeline is not None else 0
+                rows.append({
+                    'session_name': session,
+                    'run_number': run,
+                    'run_length': length
+                })
+            except Exception as e:
+                logger.warning(f"Failed to extract run length for {session}, run {run}: {e}")
+        
+        return pd.DataFrame(rows)
 
