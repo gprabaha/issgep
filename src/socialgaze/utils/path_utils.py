@@ -342,6 +342,9 @@ def get_saccade_df_path(processed_data_dir: Path) -> Path:
 def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
     return config.processed_data_dir / f"mutual_fixation_density_{fixation_type}.pkl"
 
+def get_interactivity_df_path(config, fixation_type='face') -> Path:
+    return config.processed_data_dir / "interactive_periods.pkl"
+
 
 # --------------
 # General

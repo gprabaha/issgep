@@ -28,7 +28,7 @@ class FixationConfig(BaseConfig):
 
         # === Behavior flags ===
         self.test_single_run = False
-        self.detect_fixations_again = True
+        self.detect_fixations_again = False
         self.update_labes_in_dfs = True
         self.fixation_labeling_log_interval = 100
 
@@ -41,6 +41,9 @@ class FixationConfig(BaseConfig):
         self.cpus_per_task = 1
         self.mem_per_cpu = 8000
         self.time_limit = "00:15:00"
+
+        # == Annotation ==
+        self.use_parallel = False
 
         self._assign_paths()
         self.save_to_json()

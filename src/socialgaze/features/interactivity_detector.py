@@ -91,6 +91,63 @@ class InteractivityDetector:
     def load_result(self) -> pd.DataFrame:
         return load_df_from_pkl(self.output_path)
 
+    def compute_interactivity_periods(self) -> None:
+        """
+        Computes periods of interactivity (start/stop indices) for each session and run,
+        using thresholded mutual fixation density.
+        Stores the result in self.interactivity_df.
+        """
+        if self.mutual_fixation_density is None:
+            logger.info("No mutual fixation density in memory, attempting to load.")
+            self.mutual_fixation_density = self.load_result()
+        results = []
+        for (session, run), group in self.mutual_fixation_density.groupby(["session_name", "run_number"]):
+            mutual = np.array(group["mutual_density"].values[0])
+            threshold = 0.63 * np.mean(mutual)
+            is_interactive = mutual > threshold
+            periods = _get_interactive_periods(is_interactive)
+            for start, stop in periods:
+                results.append({
+                    "session_name": session,
+                    "run_number": run,
+                    "start": start,
+                    "stop": stop
+                })
+        self.interactivity_df = pd.DataFrame(results)
+    
+
+    def save_interactivity_result(self, path: str = None):
+        """Saves the interactivity_df to disk as a pickle file."""
+        if self.interactivity_df is None:
+            raise ValueError("No interactivity data to save.")
+        path = path or self.config.interactivity_df_path
+        save_df_to_pkl(self.interactivity_df, path)
+        logger.info("Saved interactivity dataframe to %s", path)
+
+    def load_interactivity_result(self, path: str = None) -> pd.DataFrame:
+        """Loads the interactivity_df from disk."""
+        path = path or self.config.interactivity_df_path
+        self.interactivity_df = load_df_from_pkl(path)
+        logger.info("Loaded interactivity dataframe from %s", path)
+        return self.interactivity_df
+
+    def get_interactivity(self, session_name: str = None, run_number: str = None) -> pd.DataFrame:
+        """
+        Returns the interactivity periods, optionally filtered by session and run.
+        Loads from disk if not already in memory.
+        """
+        if self.interactivity_df is None:
+            logger.info("Interactivity dataframe not in memory. Loading from disk.")
+            self.load_interactivity_result()
+
+        df = self.interactivity_df
+        if session_name:
+            df = df[df["session_name"] == session_name]
+        if run_number:
+            df = df[df["run_number"] == run_number]
+        return df.reset_index(drop=True)
+
+
     def _process_session(self, session_name, session_df):
         run_groups = session_df.groupby("run_number")
         results = []
@@ -154,3 +211,15 @@ def compute_fixation_metrics(binary_vector):
 
 def normalize_density(arr):
     return (arr - np.min(arr)) / (np.max(arr) - np.min(arr) + 1e-8)
+
+
+def _get_interactive_periods(binary_vector):
+    """Returns (start, stop) index tuples for contiguous 1's in a binary vector."""
+    vec = np.array(binary_vector).astype(int)
+    if np.all(vec == 0):
+        return []
+
+    changes = np.where(np.diff(np.pad(vec, (1, 1), 'constant')) != 0)[0]
+    starts = changes[::2]
+    stops = changes[1::2]
+    return list(zip(starts, stops))
