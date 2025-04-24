@@ -1,10 +1,10 @@
-# src/socialgaze/config/neural_config.py
+# src/socialgaze/config/psth_config.py
 
 from socialgaze.config.base_config import BaseConfig
-from socialgaze.utils.path_utils import get_psth_output_path, get_spike_data_dir
+from socialgaze.utils.path_utils import get_psth_per_trial_path
 
 
-class NeuralConfig(BaseConfig):
+class PSTHConfig(BaseConfig):
     def __init__(self, config_path: str = None):
         """
         Configuration for neural data analysis, including PSTH extraction parameters.
@@ -22,5 +22,4 @@ class NeuralConfig(BaseConfig):
         self.psth_window = (-0.5, 1)  # window around event (s before, s after)
         
         # === Data Paths ===
-        self.
         self.psth_per_trial_path = get_psth_per_trial_path(self)  # Where to save the PSTH dataframe

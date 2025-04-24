@@ -575,6 +575,7 @@
     "pupil_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/pupil_size",
     "roi_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/roi_rects",
     "file_pattern": "{session_date}_position_{run_number}.mat",
+    "spiketimes_mat_path": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/unit_spiketimes.mat",
     "test_single_run": false,
     "detect_fixations_again": false,
     "update_labes_in_dfs": true,

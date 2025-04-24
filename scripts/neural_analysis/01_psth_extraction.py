@@ -16,7 +16,7 @@ import logging
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
-from socialgaze.config.neural_config import NeuralConfig
+from socialgaze.config.psth_config import PSTHConfig
 from socialgaze.config.interactivity_config import InteractivityConfig
 
 from socialgaze.data.gaze_data import GazeData
@@ -34,7 +34,7 @@ def main():
     logger.info("Initializing configs...")
     base_config = BaseConfig()
     fixation_config = FixationConfig()
-    neural_config = NeuralConfig()
+    neural_config = PSTHConfig()
     interactivity_config = InteractivityConfig()
 
     logger.info("Initializing data objects...")
@@ -60,6 +60,7 @@ def main():
         logger.info("Saving PSTH dataframes to disk...")
         extractor.save_dataframes()
         logger.info("PSTH extraction and save completed successfully.")
+        print(extractor.psth_per_trial.head())
     except Exception as e:
         logger.exception(f"PSTH extraction failed: {e}")
 

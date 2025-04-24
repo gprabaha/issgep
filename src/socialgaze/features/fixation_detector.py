@@ -32,9 +32,9 @@ class FixationDetector:
     def __init__(self, gaze_data: GazeData, config: FixationConfig):
         self.gaze_data = gaze_data
         self.config = config
-        self.fixations = pd.DataFrame()
-        self.saccades = pd.DataFrame()
-        self.fixation_binary_vectors = pd.DataFrame()
+        self.fixations: Optional[pd.DataFrame] = None
+        self.saccades: Optional[pd.DataFrame] = None
+        self.fixation_binary_vectors: Optional[pd.DataFrame] = None
 
     def detect_fixations_through_hpc_jobs(self):
         logger.info("\n ** Generating fixation and saccade detection jobs...")

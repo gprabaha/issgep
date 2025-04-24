@@ -2,6 +2,7 @@
 
 import os
 import logging
+from typing import Optional
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -11,17 +12,6 @@ from scipy.ndimage import gaussian_filter1d
 from socialgaze.utils.saving_utils import save_df_to_pkl
 from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.config.interactivity_config import InteractivityConfig
-
-logger = logging.getLogger(__name__)
-
-
-import os
-import logging
-import pandas as pd
-from tqdm import tqdm
-from joblib import Parallel, delayed
-from socialgaze.utils.saving_utils import save_df_to_pkl
-from socialgaze.utils.loading_utils import load_df_from_pkl
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +29,9 @@ class InteractivityDetector:
         self.output_path = config.mutual_fixation_density_path
         self.num_cpus = config.num_cpus
 
-        self.fix_binary_vector_df: pd.DataFrame = None
-        self.mutual_fixation_density: pd.DataFrame = None
-        self.interactivity_periods: pd.DataFrame = None
+        self.fix_binary_vector_df: Optional[pd.DataFrame] = None
+        self.mutual_fixation_density: Optional[pd.DataFrame] = None
+        self.interactivity_periods: Optional[pd.DataFrame] = None
 
 
     def detect_mutual_face_fix_density(self, overwrite: bool = False) -> None:
