@@ -9,9 +9,10 @@ import numpy as np
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.loading_utils import load_df_from_pkl, load_mat_from_path
 from socialgaze.utils.saving_utils import save_df_to_pkl
-from socialgaze.utils.path_utils import get_spike_times_mat_path, get_spike_df_pkl_path
 
 logger = logging.getLogger(__name__)
+
+DESIRED_COLUMNS = ["session_name", "region", "unit_uuid", "channel", "spike_ts"]
 
 
 class SpikeData:
@@ -20,10 +21,10 @@ class SpikeData:
 
     Features:
     - Loads spike times from a .mat file into a pandas DataFrame.
+    - Retains only relevant fields: session_name, region, unit_uuid, channel, spike_ts.
     - Allows saving and loading of spike data as .pkl for faster access.
-    - Provides `get_data()` to retrieve the dataframe with safety checks.
+    - Provides `get_data()` to retrieve the dataframe with safety checks and optional filtering.
     """
-
 
     def __init__(self, config: BaseConfig):
         """
@@ -35,10 +36,10 @@ class SpikeData:
         self.config = config
         self.spike_df: Optional[pd.DataFrame] = None
 
-
     def load_from_mat(self):
         """
-        Loads spike times from the raw .mat file and converts them to a DataFrame.
+        Loads spike times from the raw .mat file and converts them to a DataFrame,
+        retaining only selected columns.
         """
         spike_path = self.config.spiketimes_mat_path
         logger.info(f"Loading spike times from {spike_path}")
@@ -47,13 +48,20 @@ class SpikeData:
         spike_dict = {}
         for key in spike_data.dtype.names:
             spike_dict[key] = _flatten_nested_arrays(spike_data[key].squeeze())
+
         df = pd.DataFrame(spike_dict)
         df.rename(columns={'session': 'session_name'}, inplace=True)
+
+        # Retain only required columns
+        missing = [col for col in DESIRED_COLUMNS if col not in df.columns]
+        if missing:
+            logger.warning(f"Missing expected columns in loaded data: {missing}")
+
+        df = df[[col for col in DESIRED_COLUMNS if col in df.columns]]
         self.spike_df = df
-        logger.info(f"Loaded spike data with {len(df)} rows.")
+        logger.info(f"Loaded spike data with shape: {df.shape}")
 
-
-    def save_to_pkl(self):
+    def save_dataframes(self):
         """
         Saves the spike DataFrame to a .pkl file.
         """
@@ -64,15 +72,13 @@ class SpikeData:
         logger.info(f"Saving spike data to {save_path}")
         save_df_to_pkl(self.spike_df, save_path)
 
-
-    def load_from_pkl(self):
+    def load_dataframes(self):
         """
         Loads the spike DataFrame from a previously saved .pkl file.
         """
         load_path = self.config.spiketimes_df_path
         logger.info(f"Loading spike data from {load_path}")
         self.spike_df = load_df_from_pkl(load_path)
-
 
     def get_data(self, session_name: Optional[str] = None, unit_uuid: Optional[str] = None) -> pd.DataFrame:
         """
@@ -92,7 +98,7 @@ class SpikeData:
         """
         if self.spike_df is None:
             try:
-                self.load_from_pkl()
+                self.load_dataframes()
             except Exception as e:
                 logger.error(f"Failed to load spike data from .pkl: {e}")
                 raise RuntimeError("Spike data not loaded and no saved pickle available.")
@@ -105,7 +111,6 @@ class SpikeData:
             df = df[df["unit_uuid"] == unit_uuid]
 
         return df.reset_index(drop=True)
-
 
 
 def _flatten_nested_arrays(arr):

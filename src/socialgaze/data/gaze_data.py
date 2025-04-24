@@ -153,7 +153,7 @@ class GazeData:
 
     # Load and save generated dataframes
     
-    def load_from_saved_dataframes(self, data_types: Optional[List[str]] = None):
+    def load_dataframes(self, data_types: Optional[List[str]] = None):
         """
         Loads previously saved DataFrames from .pkl files into self.raw_data.
 
@@ -243,7 +243,7 @@ class GazeData:
         # Try loading from .pkl if missing
         if df is None and load_if_available:
             logger.info(f"{data_type} not in memory. Attempting to load from .pkl...")
-            self.load_from_saved_dataframes([data_type])
+            self.load_dataframes([data_type])
             df = getattr(self, data_type, None)
 
         # Try loading from .mat if still missing

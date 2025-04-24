@@ -15,24 +15,50 @@ from socialgaze.config.interactivity_config import InteractivityConfig
 logger = logging.getLogger(__name__)
 
 
+import os
+import logging
+import pandas as pd
+from tqdm import tqdm
+from joblib import Parallel, delayed
+from socialgaze.utils.saving_utils import save_df_to_pkl
+from socialgaze.utils.loading_utils import load_df_from_pkl
+
+logger = logging.getLogger(__name__)
+
+
 class InteractivityDetector:
-    def __init__(self, fix_binary_vector_df: pd.DataFrame, config: InteractivityConfig):
-        self.fix_binary_vector_df = fix_binary_vector_df
+    def __init__(self, config):
+        """
+        Initializes the interactivity detector.
+
+        Args:
+            config (InteractivityConfig): Configuration object with file paths and parameters.
+        """
         self.config = config
         self.fixation_type = config.fixation_type_to_process
         self.output_path = config.mutual_fixation_density_path
         self.num_cpus = config.num_cpus
-        self.mutual_fixation_density: pd.DataFrame = None  # Will be populated after run()
-        self.interactivity_df: pd.DataFrame = None # Will be populated after compute_interactivity_periods()
+
+        self.fix_binary_vector_df: pd.DataFrame = None
+        self.mutual_fixation_density: pd.DataFrame = None
+        self.interactivity_periods: pd.DataFrame = None
+
 
     def detect_mutual_face_fix_density(self, overwrite: bool = False) -> None:
         """
         Computes or loads mutual fixation density and stores it in self.mutual_fixation_density.
+
+        Args:
+            overwrite (bool): If True, forces recomputation even if file exists.
         """
         if not overwrite and os.path.exists(self.output_path):
             logger.info(f"Mutual fixation density already exists. Loading from: {self.output_path}")
             self.mutual_fixation_density = self.load_fix_densities()
             return
+
+        if self.fix_binary_vector_df is None:
+            logger.info(f"Loading fixation binary vector DataFrame from: {self.config.fix_binary_vector_df_path}")
+            self.fix_binary_vector_df = load_df_from_pkl(self.config.fix_binary_vector_df_path)
 
         logger.info(f"Computing mutual {self.fixation_type} fixation density...")
 
@@ -50,10 +76,11 @@ class InteractivityDetector:
                 self._get_fix_density_in_session(session_name, session_df)
                 for session_name, session_df in tqdm(session_groups, desc="Processing Sessions")
             ]
-        logger.info("Saving mutual density detection results...")
+
         flattened_results = [entry for session_result in results for entry in session_result]
         self.mutual_fixation_density = pd.DataFrame(flattened_results)
-        self.save_fix_densities(self.mutual_fixation_density)
+        logger.info("Saving mutual fixation density...")
+        self.save_fix_densities()
 
 
 
@@ -86,19 +113,38 @@ class InteractivityDetector:
         return df.reset_index(drop=True)
 
 
-    def save_fix_densities(self):
-        df = self.mutual_fixation_density
-        save_df_to_pkl(df, self.output_path)
+    def save_fix_densities(self) -> None:
+        """
+        Saves the mutual fixation density dataframe to the configured output path.
+        The dataframe must be present in `self.mutual_fixation_density`. Raises a warning if it is None or empty.
+        """
+        if self.mutual_fixation_density is None or self.mutual_fixation_density.empty:
+            logger.warning("Mutual fixation density is empty or None. Nothing to save.")
+            return
+        save_df_to_pkl(self.mutual_fixation_density, self.output_path)
+        logger.info(f"Mutual fixation density saved to {self.output_path}")
+
 
     def load_fix_densities(self) -> pd.DataFrame:
+        """
+        Loads the mutual fixation density dataframe from the configured output path.
+        Returns:
+            pd.DataFrame: The loaded mutual fixation density dataframe.
+        Raises:
+            FileNotFoundError: If the output file does not exist.
+        """
+        if not os.path.exists(self.output_path):
+            raise FileNotFoundError(f"No fixation density file found at: {self.output_path}")
+        
         self.mutual_fixation_density = load_df_from_pkl(self.output_path)
+        logger.info(f"Mutual fixation density loaded from {self.output_path}")
         return self.mutual_fixation_density
+
 
     def compute_interactivity_periods(self, overwrite: bool = False) -> None:
         """
         Computes or loads periods of interactivity (start/stop indices) for each session and run,
         using thresholded mutual fixation density. Stores the result in self.interactivity_df.
-
         Args:
             overwrite (bool): If True, recompute and overwrite existing file. Otherwise, try to load.
         """
@@ -106,7 +152,7 @@ class InteractivityDetector:
 
         if not overwrite and os.path.exists(output_path):
             logger.info(f"Interactivity periods already exist. Loading from: {output_path}")
-            self.interactivity_df = load_df_from_pkl(output_path)
+            self.interactivity_periods = load_df_from_pkl(output_path)
             return
         if self.mutual_fixation_density is None:
             logger.info("No mutual fixation density in memory, attempting to load.")
@@ -124,8 +170,8 @@ class InteractivityDetector:
                     "start": start,
                     "stop": stop
                 })
-        self.interactivity_df = pd.DataFrame(results)
-        return self.interactivity_df 
+        self.interactivity_periods = pd.DataFrame(results)
+        return self.interactivity_periods 
 
     
 
@@ -134,26 +180,26 @@ class InteractivityDetector:
         if self.interactivity_df is None:
             raise ValueError("No interactivity data to save.")
         path = path or self.config.interactivity_df_path
-        save_df_to_pkl(self.interactivity_df, path)
+        save_df_to_pkl(self.interactivity_periods, path)
         logger.info("Saved interactivity dataframe to %s", path)
 
 
     def load_interactivity_periods(self, path: str = None) -> pd.DataFrame:
         """Loads the interactivity_df from disk."""
         path = path or self.config.interactivity_df_path
-        self.interactivity_df = load_df_from_pkl(path)
+        self.interactivity_periods = load_df_from_pkl(path)
         logger.info("Loaded interactivity dataframe from %s", path)
-        return self.interactivity_df
+        return self.interactivity_periods
 
     def get_interactivity_periods(self, session_name: str = None, run_number: str = None) -> pd.DataFrame:
         """
         Returns the interactivity periods, optionally filtered by session and run.
         Loads from disk if not already in memory.
         """
-        if self.interactivity_df is None:
+        if self.interactivity_periods is None:
             logger.info("Interactivity dataframe not in memory. Loading from disk.")
             self.load_interactivity_periods()
-        df = self.interactivity_df
+        df = self.interactivity_periods
         if session_name:
             df = df[df["session_name"] == session_name]
         if run_number:
@@ -162,6 +208,24 @@ class InteractivityDetector:
 
 
     def _get_fix_density_in_session(self, session_name, session_df):
+        """
+        Computes mutual fixation density for each run in a session.
+
+        For each run, this function retrieves binary fixation vectors for both agents (m1 and m2),
+        calculates their fixation durations and inter-fixation intervals (IFIs), and smooths the
+        vectors using Gaussian filters whose standard deviation is based on the mean of fixation 
+        duration and IFI. The mutual fixation density is then computed as the geometric mean of
+        the normalized densities from both agents.
+
+        Args:
+            session_name (str): Name of the session being processed.
+            session_df (pd.DataFrame): Dataframe containing fixation binary vectors for the session.
+
+        Returns:
+            List[Dict]: A list of dictionaries, one per run, containing session metadata,
+                        fixation metrics, and density arrays for m1, m2, and mutual fixation.
+        """
+
         run_groups = session_df.groupby("run_number")
         results = []
         for run_number, run_df in run_groups:
@@ -209,6 +273,17 @@ class InteractivityDetector:
 
 
 def compute_fixation_metrics(binary_vector):
+    """
+    Computes average fixation duration and inter-fixation interval (IFI) from a binary vector.
+
+    Args:
+        binary_vector (np.ndarray or List[int]): A binary vector where 1 indicates a fixation
+                                                 and 0 indicates absence of fixation.
+
+    Returns:
+        Tuple[float, float]: Mean fixation duration and mean inter-fixation interval.
+                             Returns (0, 0) if no fixation is detected.
+    """
     vec = np.array(binary_vector)
     if np.all(vec == 0):
         return 0, 0
@@ -222,11 +297,25 @@ def compute_fixation_metrics(binary_vector):
 
 
 def normalize_density(arr):
+    """
+    Normalizes an array to the range [0, 1].
+    Args:
+        arr (np.ndarray): Input array.
+    Returns:
+        np.ndarray: Normalized array where the minimum becomes 0 and maximum becomes 1.
+    """
     return (arr - np.min(arr)) / (np.max(arr) - np.min(arr) + 1e-8)
 
 
 def _get_interactive_periods(binary_vector):
-    """Returns (start, stop) index tuples for contiguous 1's in a binary vector."""
+    """
+    Identifies contiguous segments of 1's in a binary vector, marking interactive periods.
+    Args:
+        binary_vector (np.ndarray or List[int]): A binary vector where 1 indicates interactivity.
+    Returns:
+        List[Tuple[int, int]]: A list of (start, stop) index tuples marking interactive intervals.
+    """
+
     vec = np.array(binary_vector).astype(int)
     if np.all(vec == 0):
         return []

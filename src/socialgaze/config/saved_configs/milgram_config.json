@@ -9,6 +9,13 @@
     "processed_data_dir": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/data/processed",
     "output_dir": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/outputs",
     "plots_dir": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/outputs/plots",
+    "positions_df_path": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/data/processed/positions.pkl",
+    "pupil_df_path": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/data/processed/pupil.pkl",
+    "roi_vertices_df_path": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/data/processed/roi_vertices.pkl",
+    "neural_timeline_df_path": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/data/processed/neural_timeline.pkl",
+    "run_length_df_path": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/data/processed/run_lengths.pkl",
+    "spiketimes_df_path": "/gpfs/milgram/pi/chang/pg496/repositories/issgep/data/processed/spike_data.pkl",
+    "num_cpus": 16,
     "behav_data_types": [
         "positions",
         "roi_vertices",
@@ -567,5 +574,6 @@
     "time_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/time",
     "pupil_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/aligned_raw_samples/pupil_size",
     "roi_dir": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/eyetracking/roi_rects",
-    "file_pattern": "{session_date}_position_{run_number}.mat"
+    "file_pattern": "{session_date}_position_{run_number}.mat",
+    "spiketimes_mat_path": "/gpfs/milgram/project/chang/pg496/data_dir/social_gaze/unit_spiketimes.mat"
 }

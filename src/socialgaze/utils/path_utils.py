@@ -190,6 +190,9 @@ def get_spike_df_pkl_path(config) -> Path:
     """
     return config.processed_data_dir / "spike_data.pkl"
 
+def get_psth_per_trial_path(config) -> Path:
+    return config.processed_data_dir / "psth_per_trial.pkl"
+
 
 # ----------------------
 # Fixation jobs

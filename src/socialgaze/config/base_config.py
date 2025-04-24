@@ -66,33 +66,11 @@ class BaseConfig:
             config_path (Optional[str]): Optional path to an existing saved config file.
         """
         self.detect_runtime_environment()
-
         self.project_root = get_project_root()
         self.config_folder = get_default_config_folder(self.project_root)
         self.filename = get_config_filename(self.is_cluster, self.is_grace)
-
         # Determine config save path
         self.config_path = Path(config_path) if config_path else join_folder_and_filename(self.config_folder, self.filename)
-
-        # Core processed output paths (these are safe to set in any environment)
-        paths = get_default_data_paths(self.project_root)
-        self.processed_data_dir = paths["processed"]
-        self.output_dir = paths["outputs"]
-        self.plots_dir = paths["plots"]
-
-        # Set all processed dataframe paths via path_utils
-        self.positions_df_path = get_position_df_pkl_path(self)
-        self.pupil_df_path = get_pupil_df_pkl_path(self)
-        self.roi_vertices_df_path = get_roi_df_pkl_path(self)
-        self.neural_timeline_df_path = get_time_df_pkl_path(self)
-        self.run_length_df_path = get_run_lengths_df_pkl_path(self)
-        self.spiketimes_df_path = get_spike_df_pkl_path(self)
-
-        self.num_cpus = get_num_available_cpus(self.is_cluster)
-
-        self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
-        self.session_names: List[str] = []
-        self.runs_by_session: Dict[str, List[str]] = {}
 
         # Main logic: Load existing config or generate new one
         if self.config_path.exists():
@@ -100,6 +78,26 @@ class BaseConfig:
             self.load_from_file(self.config_path)
         else:
             logger.info(f"No config found at {self.config_path}. Generating new config.")
+
+            # Core processed output paths (these are safe to set in any environment)
+            paths = get_default_data_paths(self.project_root)
+            self.processed_data_dir = paths["processed"]
+            self.output_dir = paths["outputs"]
+            self.plots_dir = paths["plots"]
+
+            # Set all processed dataframe paths via path_utils
+            self.positions_df_path = get_position_df_pkl_path(self)
+            self.pupil_df_path = get_pupil_df_pkl_path(self)
+            self.roi_vertices_df_path = get_roi_df_pkl_path(self)
+            self.neural_timeline_df_path = get_time_df_pkl_path(self)
+            self.run_length_df_path = get_run_lengths_df_pkl_path(self)
+            self.spiketimes_df_path = get_spike_df_pkl_path(self)
+
+            self.num_cpus = get_num_available_cpus(self.is_cluster)
+
+            self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
+            self.session_names: List[str] = []
+            self.runs_by_session: Dict[str, List[str]] = {}
 
             if self.is_cluster:
                 # Only define and validate raw data paths if on a cluster
@@ -117,11 +115,11 @@ class BaseConfig:
                 self.file_pattern = get_mat_filename_pattern()
                 self.initialize_sessions_and_runs()
 
+                self.spiketimes_mat_path = get_spike_times_mat_path(self)
                 ephys_days_and_monkeys_filepath = self.processed_data_dir / "ephys_days_and_monkeys.pkl"
                 ephys_days_and_monkeys_df = load_df_from_pkl(ephys_days_and_monkeys_filepath)
                 self.extract_sessions_with_ephys_data(ephys_days_and_monkeys_df)
-                self.spiketimes_mat_path = get_spike_times_mat_path(self)
-                
+        
             self.save_to_file(self.config_path)
             logger.info(f"Base config generated and saved to {self.config_path}")
 
