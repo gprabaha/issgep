@@ -10,6 +10,7 @@ class InteractivityConfig(FixationConfig):
         if base_config:
             self.__dict__.update(base_config.__dict__)
 
+        self.interactivity_threshold = 0.63
         self.use_parallel = True
         self.fixation_type_to_process = 'face'
         self.mutual_fixation_density_path = get_mutual_fixation_density_path(self, fixation_type=self.fixation_type_to_process)

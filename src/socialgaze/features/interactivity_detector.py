@@ -23,14 +23,15 @@ class InteractivityDetector:
         self.output_path = config.mutual_fixation_density_path
         self.num_cpus = config.num_cpus
         self.mutual_fixation_density: pd.DataFrame = None  # Will be populated after run()
+        self.interactivity_df: pd.DataFrame = None # Will be populated after compute_interactivity_periods()
 
-    def run(self, overwrite: bool = False) -> None:
+    def detect_mutual_face_fix_density(self, overwrite: bool = False) -> None:
         """
         Computes or loads mutual fixation density and stores it in self.mutual_fixation_density.
         """
         if not overwrite and os.path.exists(self.output_path):
             logger.info(f"Mutual fixation density already exists. Loading from: {self.output_path}")
-            self.mutual_fixation_density = self.load_result()
+            self.mutual_fixation_density = self.load_fix_densities()
             return
 
         logger.info(f"Computing mutual {self.fixation_type} fixation density...")
@@ -40,19 +41,19 @@ class InteractivityDetector:
         if self.config.use_parallel:
             logger.info(f"Running in parallel using {self.num_cpus} CPUs")
             results = Parallel(n_jobs=self.num_cpus)(
-                delayed(self._process_session)(session_name, session_df)
+                delayed(self._get_fix_density_in_session)(session_name, session_df)
                 for session_name, session_df in tqdm(session_groups, desc="Processing Sessions")
             )
         else:
             logger.info("Running in serial mode")
             results = [
-                self._process_session(session_name, session_df)
+                self._get_fix_density_in_session(session_name, session_df)
                 for session_name, session_df in tqdm(session_groups, desc="Processing Sessions")
             ]
         logger.info("Saving mutual density detection results...")
         flattened_results = [entry for session_result in results for entry in session_result]
         self.mutual_fixation_density = pd.DataFrame(flattened_results)
-        self.save_result(self.mutual_fixation_density)
+        self.save_fix_densities(self.mutual_fixation_density)
 
 
 
@@ -85,25 +86,35 @@ class InteractivityDetector:
         return df.reset_index(drop=True)
 
 
-    def save_result(self, df: pd.DataFrame):
+    def save_fix_densities(self):
+        df = self.mutual_fixation_density
         save_df_to_pkl(df, self.output_path)
 
-    def load_result(self) -> pd.DataFrame:
-        return load_df_from_pkl(self.output_path)
+    def load_fix_densities(self) -> pd.DataFrame:
+        self.mutual_fixation_density = load_df_from_pkl(self.output_path)
+        return self.mutual_fixation_density
 
-    def compute_interactivity_periods(self) -> None:
+    def compute_interactivity_periods(self, overwrite: bool = False) -> None:
         """
-        Computes periods of interactivity (start/stop indices) for each session and run,
-        using thresholded mutual fixation density.
-        Stores the result in self.interactivity_df.
+        Computes or loads periods of interactivity (start/stop indices) for each session and run,
+        using thresholded mutual fixation density. Stores the result in self.interactivity_df.
+
+        Args:
+            overwrite (bool): If True, recompute and overwrite existing file. Otherwise, try to load.
         """
+        output_path = self.config.interactivity_df_path
+
+        if not overwrite and os.path.exists(output_path):
+            logger.info(f"Interactivity periods already exist. Loading from: {output_path}")
+            self.interactivity_df = load_df_from_pkl(output_path)
+            return
         if self.mutual_fixation_density is None:
             logger.info("No mutual fixation density in memory, attempting to load.")
-            self.mutual_fixation_density = self.load_result()
+            self.mutual_fixation_density = self.load_fix_densities()
         results = []
         for (session, run), group in self.mutual_fixation_density.groupby(["session_name", "run_number"]):
             mutual = np.array(group["mutual_density"].values[0])
-            threshold = 0.63 * np.mean(mutual)
+            threshold = self.config.interactivity_threshold * np.mean(mutual)
             is_interactive = mutual > threshold
             periods = _get_interactive_periods(is_interactive)
             for start, stop in periods:
@@ -114,9 +125,11 @@ class InteractivityDetector:
                     "stop": stop
                 })
         self.interactivity_df = pd.DataFrame(results)
+        return self.interactivity_df 
+
     
 
-    def save_interactivity_result(self, path: str = None):
+    def save_interactivity_periods(self, path: str = None):
         """Saves the interactivity_df to disk as a pickle file."""
         if self.interactivity_df is None:
             raise ValueError("No interactivity data to save.")
@@ -124,22 +137,22 @@ class InteractivityDetector:
         save_df_to_pkl(self.interactivity_df, path)
         logger.info("Saved interactivity dataframe to %s", path)
 
-    def load_interactivity_result(self, path: str = None) -> pd.DataFrame:
+
+    def load_interactivity_periods(self, path: str = None) -> pd.DataFrame:
         """Loads the interactivity_df from disk."""
         path = path or self.config.interactivity_df_path
         self.interactivity_df = load_df_from_pkl(path)
         logger.info("Loaded interactivity dataframe from %s", path)
         return self.interactivity_df
 
-    def get_interactivity(self, session_name: str = None, run_number: str = None) -> pd.DataFrame:
+    def get_interactivity_periods(self, session_name: str = None, run_number: str = None) -> pd.DataFrame:
         """
         Returns the interactivity periods, optionally filtered by session and run.
         Loads from disk if not already in memory.
         """
         if self.interactivity_df is None:
             logger.info("Interactivity dataframe not in memory. Loading from disk.")
-            self.load_interactivity_result()
-
+            self.load_interactivity_periods()
         df = self.interactivity_df
         if session_name:
             df = df[df["session_name"] == session_name]
@@ -148,10 +161,9 @@ class InteractivityDetector:
         return df.reset_index(drop=True)
 
 
-    def _process_session(self, session_name, session_df):
+    def _get_fix_density_in_session(self, session_name, session_df):
         run_groups = session_df.groupby("run_number")
         results = []
-
         for run_number, run_df in run_groups:
             m1 = run_df[(run_df.agent == "m1") & (run_df.fixation_type == self.fixation_type)]
             m2 = run_df[(run_df.agent == "m2") & (run_df.fixation_type == self.fixation_type)]

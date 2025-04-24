@@ -21,12 +21,22 @@ def main():
     # Initialize and run detector
     detector = InteractivityDetector(fix_binary_vector_df=fix_binary_vector_df, config=config)
     logger.info("Running mutual fixation density analysis...")
-    detector.run(True)
+    detector.detect_mutual_face_fix_density(False)
     logger.info("Interactivity detection complete.")
-
+    
     # Show preview
     print("\n=== Head of Mutual Fixation Density DataFrame ===")
     print(detector.get_density().head())
+    
+    logger.info("Extracting interactivity periods")
+    detector.compute_interactivity_periods()
+    logger.info("Interactivity periods detected")
+    detector.save_interactivity_periods()
+
+    # Show preview
+    print("\n=== Head of Interactivity Period DataFrame ===")
+    print(detector.get_interactivity_periods().head())
+
 
 
 if __name__ == "__main__":
