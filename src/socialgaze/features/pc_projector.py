@@ -1,4 +1,4 @@
-# src/socialgaze/features/pc_projection.py
+# src/socialgaze/features/pc_projector.py
 
 import logging
 from typing import Optional, List, Dict
@@ -9,10 +9,10 @@ from sklearn.decomposition import PCA
 logger = logging.getLogger(__name__)
 
 
-class PCProjection:
+class PCProjector:
     def __init__(self, config, psth_extractor):
         """
-        Initializes the PCProjection object.
+        Initializes the PCProjector object.
 
         Args:
             config: PCAConfig object containing PCA parameters.

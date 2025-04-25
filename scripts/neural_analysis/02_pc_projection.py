@@ -25,7 +25,7 @@ from socialgaze.data.spike_data import SpikeData
 from socialgaze.features.fixation_detector import FixationDetector
 from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.features.psth_extractor import PSTHExtractor
-from socialgaze.features.pc_projection import PCProjection
+from socialgaze.features.pc_projector import PCProjector
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -62,7 +62,7 @@ def main():
         psth_extractor.load_dataframes(which=["by_category"])
 
         logger.info("Creating PC projection object...")
-        pc_projector = PCProjection(config=pca_config, psth_extractor=psth_extractor)
+        pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
 
         logger.info("Starting PCA projection on average firing rates...")
         pc_projector.project_avg_firing_rate_by_category()
