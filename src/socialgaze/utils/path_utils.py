@@ -1,11 +1,12 @@
 # src/socialgaze/utils/path_utils.py
 
 from pathlib import Path
-from typing import Dict, Optional, List, Union
+from typing import Dict, Union
 
-# --------------
-# Config
-# --------------
+
+# --------------------
+# == Root paths ==
+# --------------------
 
 def determine_root_data_dir(is_cluster: bool, is_grace: bool, prabaha_local: bool) -> str:
     """
@@ -28,6 +29,7 @@ def determine_root_data_dir(is_cluster: bool, is_grace: bool, prabaha_local: boo
     if prabaha_local:
         return Path("/Users/prabaha/data_dir/social_gaze")
     return Path("../data/raw")
+
 
 def get_project_root() -> Path:
     """
@@ -58,6 +60,9 @@ def get_default_config_folder(project_root: Path) -> Path:
     config_folder.mkdir(parents=True, exist_ok=True)
     return config_folder
 
+# --------------------
+# == Raw data paths ==
+# --------------------
 
 def get_default_data_paths(project_root: Path) -> Dict[str, Path]:
     """
@@ -74,25 +79,6 @@ def get_default_data_paths(project_root: Path) -> Dict[str, Path]:
         "outputs": project_root / "outputs",
         "plots": project_root / "outputs/plots",
     }
-
-
-def get_position_df_pkl_path(config) -> Path:
-    return config.processed_data_dir / "positions.pkl"
-
-def get_pupil_df_pkl_path(config) -> Path:
-    return config.processed_data_dir / "pupil.pkl"
-
-def get_roi_df_pkl_path(config) -> Path:
-    return config.processed_data_dir / "roi_vertices.pkl"
-
-def get_time_df_pkl_path(config) -> Path:
-    return config.processed_data_dir / "neural_timeline.pkl"
-
-def get_run_lengths_df_pkl_path(config) -> Path:
-    return config.processed_data_dir / "run_lengths.pkl"
-
-def get_fix_binary_vec_df_path(config) -> Path:
-    return config.processed_data_dir / "fixation_binary_vectors.pkl"
 
 
 def get_raw_data_directories(data_root: Path) -> Dict[str, Path]:
@@ -183,6 +169,27 @@ def get_spike_times_mat_path(config) -> Path:
     """
     return config.data_dir / "unit_spiketimes.mat"
 
+# ---------------------------------------------------------
+# == Processed behavioral and spike data df pickle paths ==
+# ---------------------------------------------------------
+
+def get_position_df_pkl_path(config) -> Path:
+    return config.processed_data_dir / "positions.pkl"
+
+def get_pupil_df_pkl_path(config) -> Path:
+    return config.processed_data_dir / "pupil.pkl"
+
+def get_roi_df_pkl_path(config) -> Path:
+    return config.processed_data_dir / "roi_vertices.pkl"
+
+def get_time_df_pkl_path(config) -> Path:
+    return config.processed_data_dir / "neural_timeline.pkl"
+
+def get_run_lengths_df_pkl_path(config) -> Path:
+    return config.processed_data_dir / "run_lengths.pkl"
+
+def get_fix_binary_vec_df_path(config) -> Path:
+    return config.processed_data_dir / "fixation_binary_vectors.pkl"
 
 def get_spike_df_pkl_path(config) -> Path:
     """
@@ -190,6 +197,52 @@ def get_spike_df_pkl_path(config) -> Path:
     """
     return config.processed_data_dir / "spike_data.pkl"
 
+
+# -----------------------------------------------------
+# == Paths to data analysis result dataframe pickles ==
+# -----------------------------------------------------
+
+# == Fix and saccade paths ==
+
+def get_fixation_df_path(processed_data_dir: Path) -> Path:
+    """
+    Returns the path to the final saved fixation dataframe.
+
+    Args:
+        processed_data_dir (Path): Base directory where processed data is stored.
+
+    Returns:
+        Path: Path to 'fixations.pkl'.
+    """
+    processed_data_dir = Path(processed_data_dir)
+    processed_data_dir.mkdir(parents=True, exist_ok=True)
+    return processed_data_dir / "fixations.pkl"
+
+
+def get_saccade_df_path(processed_data_dir: Path) -> Path:
+    """
+    Returns the path to the final saved saccade dataframe.
+
+    Args:
+        processed_data_dir (Path): Base directory where processed data is stored.
+
+    Returns:
+        Path: Path to 'saccades.pkl'.
+    """
+    processed_data_dir = Path(processed_data_dir)
+    processed_data_dir.mkdir(parents=True, exist_ok=True)
+    return processed_data_dir / "saccades.pkl"
+
+# == Interactivity paths ==
+
+def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
+    return config.processed_data_dir / f"mutual_fixation_density_{fixation_type}.pkl"
+
+def get_interactivity_df_path(config, fixation_type='face') -> Path:
+    return config.processed_data_dir / "interactive_periods.pkl"
+
+# == PSTH paths ==
+ 
 def get_psth_per_trial_path(config) -> str:
     """
     Returns the path for saving/loading the per-trial PSTH dataframe.
@@ -211,11 +264,9 @@ def get_avg_psth_per_category_and_interactivity_path(config) -> str:
     return config.processed_data_dir / "avg_psth_per_category_and_interactivity.pkl"
 
 
-
-
-# ----------------------
-# Fixation jobs
-# ----------------------
+# --------------------------------
+# == Fixation job related paths ==
+# --------------------------------
 
 def get_fixation_config_json_path(config_folder: Path) -> Path:
     """
@@ -329,48 +380,9 @@ def get_sbatch_script_path(job_out_dir: Path, job_name: str) -> Path:
     scripts_dir.mkdir(parents=True, exist_ok=True)
     return scripts_dir / f"dsq-joblist_{job_name}.sh"
 
-
-def get_fixation_df_path(processed_data_dir: Path) -> Path:
-    """
-    Returns the path to the final saved fixation dataframe.
-
-    Args:
-        processed_data_dir (Path): Base directory where processed data is stored.
-
-    Returns:
-        Path: Path to 'fixations.pkl'.
-    """
-    processed_data_dir = Path(processed_data_dir)
-    processed_data_dir.mkdir(parents=True, exist_ok=True)
-    return processed_data_dir / "fixations.pkl"
-
-
-def get_saccade_df_path(processed_data_dir: Path) -> Path:
-    """
-    Returns the path to the final saved saccade dataframe.
-
-    Args:
-        processed_data_dir (Path): Base directory where processed data is stored.
-
-    Returns:
-        Path: Path to 'saccades.pkl'.
-    """
-    processed_data_dir = Path(processed_data_dir)
-    processed_data_dir.mkdir(parents=True, exist_ok=True)
-    return processed_data_dir / "saccades.pkl"
-
-
-
-def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
-    return config.processed_data_dir / f"mutual_fixation_density_{fixation_type}.pkl"
-
-def get_interactivity_df_path(config, fixation_type='face') -> Path:
-    return config.processed_data_dir / "interactive_periods.pkl"
-
-
-# --------------
-# General
-# --------------
+# ------------------------
+# == General path tools ==
+# ------------------------
 
 def join_folder_and_filename(folder: Union[str, Path], filename: str) -> Path:
     """

@@ -2,7 +2,7 @@
 
 import os
 import logging
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -123,6 +123,7 @@ class PSTHExtractor:
             else:
                 logger.warning(f"Avg PSTH per category and interactivity file not found at {self.config.avg_psth_per_category_and_interactivity_path}")
 
+
     def get_psth(
         self,
         which: str,
@@ -177,7 +178,6 @@ class PSTHExtractor:
     # ----------------------------------
     # == Methods to compute PSTH data ==
     # ----------------------------------
-
 
     def compute_psth_per_trial(self, overwrite: bool = False):
         """
@@ -238,7 +238,6 @@ class PSTHExtractor:
         # Save after recomputing
         save_df_to_pkl(self.psth_per_trial, self.config.psth_per_trial_path)
         logger.info(f"Saved new PSTH per trial dataframe to {self.config.psth_per_trial_path}")
-
 
 
     def compute_avg_psth_per_category(self):
