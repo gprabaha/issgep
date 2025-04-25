@@ -187,11 +187,12 @@ def _process_fixation_row_for_psth(
     do_smoothing=False,
     smoothing_sigma_bins=2.0,
 ):
-    idx = int(row["start"])
-    if idx >= len(neural_times):
+    idx_start = int(row["start"])
+    idx_stop = int(row["stop"])
+    if idx_start >= len(neural_times):
         return None
 
-    t0 = neural_times[idx]
+    t0 = neural_times[idx_start]
     window_start, window_end = t0 + start_offset, t0 + end_offset
     bins = np.linspace(window_start, window_end, num_bins + 1)
     counts, _ = np.histogram(np.asarray(spike_times).ravel(), bins=bins)
@@ -200,14 +201,15 @@ def _process_fixation_row_for_psth(
     if do_smoothing:
         firing_rate = gaussian_filter1d(firing_rate, sigma=smoothing_sigma_bins)
 
-    is_interactive = any(start <= idx < stop for start, stop in interactive_periods)
+    is_interactive = any(start <= idx_start < stop for start, stop in interactive_periods)
 
     return {
         "session_name": row["session_name"],
         "run_number": row["run_number"],
         "agent": row["agent"],
-        "fixation_start_idx": idx,
-        "fixation_category": row.get("fixation_category", "unknown"),
+        "fixation_start_idx": idx_start,
+        "fixation_stop_idx": idx_stop,
+        "category": row.get("category"),
         "is_interactive": "interactive" if is_interactive else "non-interactive",
         "firing_rate": firing_rate.tolist(),
         **unit_metadata
