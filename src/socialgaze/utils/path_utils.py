@@ -190,8 +190,27 @@ def get_spike_df_pkl_path(config) -> Path:
     """
     return config.processed_data_dir / "spike_data.pkl"
 
-def get_psth_per_trial_path(config) -> Path:
+def get_psth_per_trial_path(config) -> str:
+    """
+    Returns the path for saving/loading the per-trial PSTH dataframe.
+    """
     return config.processed_data_dir / "psth_per_trial.pkl"
+
+
+def get_avg_psth_per_category_path(config) -> str:
+    """
+    Returns the path for saving/loading the average PSTH per category dataframe.
+    """
+    return config.processed_data_dir / "avg_psth_per_category.pkl"
+
+
+def get_avg_psth_per_category_and_interactivity_path(config) -> str:
+    """
+    Returns the path for saving/loading the average PSTH per category and interactivity dataframe.
+    """
+    return config.processed_data_dir / "avg_psth_per_category_and_interactivity.pkl"
+
+
 
 
 # ----------------------

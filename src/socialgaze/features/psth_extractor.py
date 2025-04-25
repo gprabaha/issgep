@@ -35,12 +35,93 @@ class PSTHExtractor:
         self.interactivity_detector = interactivity_detector
         self.psth_per_trial: Optional[pd.DataFrame] = None
 
-    def compute_psth_per_trial(self):
+
+    def save_dataframes(self, which: Optional[List[str]] = None):
+        """
+        Saves the specified dataframe(s) to the configured output paths.
+
+        Args:
+            which (List[str], optional): List of {'psth_per_trial', 'avg_psth_per_category', 'avg_psth_per_category_and_interactivity'}.
+                                        If None, saves all available.
+        """
+        if which is None:
+            which = ["psth_per_trial", "avg_psth_per_category", "avg_psth_per_category_and_interactivity"]
+
+        os.makedirs(os.path.dirname(self.config.psth_per_trial_path), exist_ok=True)
+
+        if "psth_per_trial" in which:
+            if self.psth_per_trial is not None and not self.psth_per_trial.empty:
+                save_df_to_pkl(self.psth_per_trial, self.config.psth_per_trial_path)
+                logger.info(f"PSTH per trial data saved to {self.config.psth_per_trial_path}")
+            else:
+                logger.warning("No psth_per_trial data to save.")
+
+        if "avg_psth_per_category" in which:
+            if self.avg_psth_per_category is not None and not self.avg_psth_per_category.empty:
+                save_df_to_pkl(self.avg_psth_per_category, self.config.avg_psth_per_category_path)
+                logger.info(f"Avg PSTH per category data saved to {self.config.avg_psth_per_category_path}")
+            else:
+                logger.warning("No avg_psth_per_category data to save.")
+
+        if "avg_psth_per_category_and_interactivity" in which:
+            if self.avg_psth_per_category_and_interactivity is not None and not self.avg_psth_per_category_and_interactivity.empty:
+                save_df_to_pkl(self.avg_psth_per_category_and_interactivity, self.config.avg_psth_per_category_and_interactivity_path)
+                logger.info(f"Avg PSTH per category and interactivity data saved to {self.config.avg_psth_per_category_and_interactivity_path}")
+            else:
+                logger.warning("No avg_psth_per_category_and_interactivity data to save.")
+
+
+    def load_dataframes(self, which: Optional[List[str]] = None):
+        """
+        Loads the specified dataframe(s) from the configured output paths.
+
+        Args:
+            which (List[str], optional): List of {'psth_per_trial', 'avg_psth_per_category', 'avg_psth_per_category_and_interactivity'}.
+                                        If None, loads all available.
+        """
+        if which is None:
+            which = ["psth_per_trial", "avg_psth_per_category", "avg_psth_per_category_and_interactivity"]
+
+        if "psth_per_trial" in which:
+            if os.path.exists(self.config.psth_per_trial_path):
+                self.psth_per_trial = load_df_from_pkl(self.config.psth_per_trial_path)
+                logger.info(f"Loaded psth_per_trial from {self.config.psth_per_trial_path}")
+            else:
+                logger.warning(f"PSTH per trial file not found at {self.config.psth_per_trial_path}")
+
+        if "avg_psth_per_category" in which:
+            if os.path.exists(self.config.avg_psth_per_category_path):
+                self.avg_psth_per_category = load_df_from_pkl(self.config.avg_psth_per_category_path)
+                logger.info(f"Loaded avg_psth_per_category from {self.config.avg_psth_per_category_path}")
+            else:
+                logger.warning(f"Avg PSTH per category file not found at {self.config.avg_psth_per_category_path}")
+
+        if "avg_psth_per_category_and_interactivity" in which:
+            if os.path.exists(self.config.avg_psth_per_category_and_interactivity_path):
+                self.avg_psth_per_category_and_interactivity = load_df_from_pkl(self.config.avg_psth_per_category_and_interactivity_path)
+                logger.info(f"Loaded avg_psth_per_category_and_interactivity from {self.config.avg_psth_per_category_and_interactivity_path}")
+            else:
+                logger.warning(f"Avg PSTH per category and interactivity file not found at {self.config.avg_psth_per_category_and_interactivity_path}")
+
+
+    def compute_psth_per_trial(self, overwrite: bool = False):
         """
         Computes PSTHs for each unit across sessions and runs using fixations from agent m1.
         Each fixation is tagged as interactive or not and associated with unit metadata.
         Results are stored in self.psth_per_trial.
+
+        Args:
+            overwrite (bool): If False (default), will load existing PSTH if available.
+                              If True, will recompute PSTH even if file exists.
         """
+        if not overwrite and os.path.exists(self.config.psth_per_trial_path):
+            logger.info(f"PSTH per trial file exists at {self.config.psth_per_trial_path}. Loading instead of recomputing.")
+            self.psth_per_trial = load_df_from_pkl(self.config.psth_per_trial_path)
+            return
+
+        # Otherwise recompute
+        logger.info("Computing PSTHs from scratch...")
+
         if self.gaze_data.neural_timeline is None:
             self.gaze_data.load_dataframes(['neural_timeline'])
         if self.fixation_detector.fixations is None:
@@ -79,25 +160,75 @@ class PSTHExtractor:
         self.psth_per_trial = pd.DataFrame(all_psth_rows)
         logger.info(f"Extracted {len(self.psth_per_trial)} PSTHs.")
 
-    def save_dataframes(self):
+        # Save after recomputing
+        save_df_to_pkl(self.psth_per_trial, self.config.psth_per_trial_path)
+        logger.info(f"Saved new PSTH per trial dataframe to {self.config.psth_per_trial_path}")
+
+
+
+    def compute_avg_psth_per_category(self):
         """
-        Saves the PSTH dataframe to the configured output path.
+        Computes average PSTH per unit across fixation categories,
+        grouping only by unit_uuid (not session/run), but retaining session/run in the output.
+        Stores result in self.avg_psth_per_category.
         """
         if self.psth_per_trial is None or self.psth_per_trial.empty:
-            logger.warning("No PSTH data to save.")
+            logger.error("PSTH per trial data is not available. Run compute_psth_per_trial first.")
             return
-        save_df_to_pkl(self.psth_per_trial, self.config.psth_per_trial_path)
-        logger.info(f"PSTH data saved to {self.config.psth_per_trial_path}")
 
-    def load_dataframes(self):
+        logger.info("Computing average PSTH per unit per fixation category...")
+
+        rows = []
+        grouped = self.psth_per_trial.groupby(["unit_uuid", "category"])
+
+        for (unit_uuid, category), group in grouped:
+            psth_array = np.stack(group["firing_rate"].apply(np.array).values)
+            mean_psth = psth_array.mean(axis=0)
+
+            for _, row in group.iterrows():
+                rows.append({
+                    "session_name": row["session_name"],
+                    "unit_uuid": unit_uuid,
+                    "category": category,
+                    "avg_firing_rate": mean_psth.tolist()
+                })
+                break  # Only need one session/run info per group
+
+        self.avg_psth_per_category = pd.DataFrame(rows)
+        logger.info(f"Computed average PSTH for {len(self.avg_psth_per_category)} unit-category combinations.")
+
+
+    def compute_avg_psth_per_category_and_interactivity(self):
         """
-        Loads PSTH data from the configured output path into self.psth_df.
+        Computes average PSTH per unit across fixation categories and interactivity,
+        grouping only by unit_uuid, but retaining session/run in the output.
+        Stores result in self.avg_psth_per_category_and_interactivity.
         """
-        if not os.path.exists(self.config.psth_per_trial_path):
-            logger.error(f"PSTH file not found at: {self.config.psth_per_trial_path}")
+        if self.psth_per_trial is None or self.psth_per_trial.empty:
+            logger.error("PSTH per trial data is not available. Run compute_psth_per_trial first.")
             return
-        self.psth_per_trial = load_df_from_pkl(self.config.psth_per_trial_path)
-        logger.info(f"Loaded PSTH data from {self.config.psth_per_trial_path}")
+
+        logger.info("Computing average PSTH per unit per fixation category and interactivity...")
+
+        rows = []
+        grouped = self.psth_per_trial.groupby(["unit_uuid", "category", "is_interactive"])
+
+        for (unit_uuid, category, is_interactive), group in grouped:
+            psth_array = np.stack(group["firing_rate"].apply(np.array).values)
+            mean_psth = psth_array.mean(axis=0)
+
+            for _, row in group.iterrows():
+                rows.append({
+                    "session_name": row["session_name"],
+                    "unit_uuid": unit_uuid,
+                    "category": category,
+                    "is_interactive": is_interactive,
+                    "avg_firing_rate": mean_psth.tolist()
+                })
+                break  # Only need one session info per group
+
+        self.avg_psth_per_category_and_interactivity = pd.DataFrame(rows)
+        logger.info(f"Computed average PSTH for {len(self.avg_psth_per_category_and_interactivity)} unit-category-interactivity combinations.")
 
 
 def _process_session_for_psth(
