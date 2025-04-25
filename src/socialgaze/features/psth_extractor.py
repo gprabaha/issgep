@@ -165,14 +165,14 @@ class PSTHExtractor:
             "is_interactive": is_interactive,
         }
 
-    # Apply filtering if possible
-    for col, value in filters.items():
-        if value is not None:
-            if col not in df.columns:
-                raise ValueError(f"Cannot filter by '{col}' because it is not present in dataframe '{which}'.")
-            df = df[df[col] == value]
+        # Apply filtering if possible
+        for col, value in filters.items():
+            if value is not None:
+                if col not in df.columns:
+                    raise ValueError(f"Cannot filter by '{col}' because it is not present in dataframe '{which}'.")
+                df = df[df[col] == value]
 
-    return df
+        return df
 
     # ----------------------------------
     # == Methods to compute PSTH data ==
