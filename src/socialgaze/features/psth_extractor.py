@@ -33,37 +33,53 @@ class PSTHExtractor:
         self.spike_data = spike_data
         self.fixation_detector = fixation_detector
         self.interactivity_detector = interactivity_detector
-        self.psth_per_trial: Optional[pd.DataFrame] = None
+        
+        self.psth_mapping = {
+            "trial_wise": "psth_per_trial",
+            "by_category": "avg_psth_per_category",
+            "by_interactivity": "avg_psth_per_category_and_interactivity",
+        }
 
+        self.psth_per_trial: Optional[pd.DataFrame] = None
+        self.avg_psth_per_category: Optional[pd.DataFrame] = None
+        self.avg_psth_per_category_and_interactivity: Optional[pd.DataFrame] = None
+
+    # -------------------------------------------
+    # == Methods to import or export PSTH data ==
+    # -------------------------------------------
 
     def save_dataframes(self, which: Optional[List[str]] = None):
         """
         Saves the specified dataframe(s) to the configured output paths.
 
         Args:
-            which (List[str], optional): List of {'psth_per_trial', 'avg_psth_per_category', 'avg_psth_per_category_and_interactivity'}.
+            which (List[str], optional): List of {'trial_wise', 'by_category', 'by_interactivity'}.
                                         If None, saves all available.
         """
         if which is None:
-            which = ["psth_per_trial", "avg_psth_per_category", "avg_psth_per_category_and_interactivity"]
+            which = list(self.psth_mapping.keys())
+
+        for key in which:
+            if key not in self.psth_mapping:
+                raise ValueError(f"Invalid save option '{key}'. Valid options: {list(self.psth_mapping.keys())}")
 
         os.makedirs(os.path.dirname(self.config.psth_per_trial_path), exist_ok=True)
 
-        if "psth_per_trial" in which:
+        if "trial_wise" in which:
             if self.psth_per_trial is not None and not self.psth_per_trial.empty:
                 save_df_to_pkl(self.psth_per_trial, self.config.psth_per_trial_path)
                 logger.info(f"PSTH per trial data saved to {self.config.psth_per_trial_path}")
             else:
                 logger.warning("No psth_per_trial data to save.")
 
-        if "avg_psth_per_category" in which:
+        if "by_category" in which:
             if self.avg_psth_per_category is not None and not self.avg_psth_per_category.empty:
                 save_df_to_pkl(self.avg_psth_per_category, self.config.avg_psth_per_category_path)
                 logger.info(f"Avg PSTH per category data saved to {self.config.avg_psth_per_category_path}")
             else:
                 logger.warning("No avg_psth_per_category data to save.")
 
-        if "avg_psth_per_category_and_interactivity" in which:
+        if "by_interactivity" in which:
             if self.avg_psth_per_category_and_interactivity is not None and not self.avg_psth_per_category_and_interactivity.empty:
                 save_df_to_pkl(self.avg_psth_per_category_and_interactivity, self.config.avg_psth_per_category_and_interactivity_path)
                 logger.info(f"Avg PSTH per category and interactivity data saved to {self.config.avg_psth_per_category_and_interactivity_path}")
@@ -76,32 +92,91 @@ class PSTHExtractor:
         Loads the specified dataframe(s) from the configured output paths.
 
         Args:
-            which (List[str], optional): List of {'psth_per_trial', 'avg_psth_per_category', 'avg_psth_per_category_and_interactivity'}.
+            which (List[str], optional): List of {'trial_wise', 'by_category', 'by_interactivity'}.
                                         If None, loads all available.
         """
         if which is None:
-            which = ["psth_per_trial", "avg_psth_per_category", "avg_psth_per_category_and_interactivity"]
+            which = list(self.psth_mapping.keys())
 
-        if "psth_per_trial" in which:
+        for key in which:
+            if key not in self.psth_mapping:
+                raise ValueError(f"Invalid load option '{key}'. Valid options: {list(self.psth_mapping.keys())}")
+
+        if "trial_wise" in which:
             if os.path.exists(self.config.psth_per_trial_path):
                 self.psth_per_trial = load_df_from_pkl(self.config.psth_per_trial_path)
                 logger.info(f"Loaded psth_per_trial from {self.config.psth_per_trial_path}")
             else:
                 logger.warning(f"PSTH per trial file not found at {self.config.psth_per_trial_path}")
 
-        if "avg_psth_per_category" in which:
+        if "by_category" in which:
             if os.path.exists(self.config.avg_psth_per_category_path):
                 self.avg_psth_per_category = load_df_from_pkl(self.config.avg_psth_per_category_path)
                 logger.info(f"Loaded avg_psth_per_category from {self.config.avg_psth_per_category_path}")
             else:
                 logger.warning(f"Avg PSTH per category file not found at {self.config.avg_psth_per_category_path}")
 
-        if "avg_psth_per_category_and_interactivity" in which:
+        if "by_interactivity" in which:
             if os.path.exists(self.config.avg_psth_per_category_and_interactivity_path):
                 self.avg_psth_per_category_and_interactivity = load_df_from_pkl(self.config.avg_psth_per_category_and_interactivity_path)
                 logger.info(f"Loaded avg_psth_per_category_and_interactivity from {self.config.avg_psth_per_category_and_interactivity_path}")
             else:
                 logger.warning(f"Avg PSTH per category and interactivity file not found at {self.config.avg_psth_per_category_and_interactivity_path}")
+
+    def get_psth(
+        self,
+        which: str,
+        session_name: Optional[str] = None,
+        unit_uuid: Optional[str] = None,
+        category: Optional[str] = None,
+        is_interactive: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Retrieves a PSTH dataframe based on type and optional filters.
+
+        Args:
+            which (str): One of {'trial_wise', 'by_category', 'by_interactivity'}.
+            session_name (str, optional): Filter by session_name if available.
+            unit_uuid (str, optional): Filter by unit_uuid if available.
+            category (str, optional): Filter by category if available.
+            is_interactive (str, optional): Filter by interactivity if available.
+
+        Returns:
+            pd.DataFrame: Filtered PSTH dataframe.
+        """
+        if which not in self.psth_mapping:
+            raise ValueError(f"Invalid PSTH type '{which}'. Valid options are {list(self.psth_mapping.keys())}")
+
+        attr_name = self.psth_mapping[which]
+        df = getattr(self, attr_name)
+
+        if df is None or df.empty:
+            logger.info(f"DataFrame '{which}' is empty. Attempting to load...")
+            self.load_dataframes(which=[which])
+            df = getattr(self, attr_name)
+
+        if df is None or df.empty:
+            raise ValueError(f"Unable to load PSTH dataframe for '{which}'.")
+
+        filters = {
+            "session_name": session_name,
+            "unit_uuid": unit_uuid,
+            "category": category,
+            "is_interactive": is_interactive,
+        }
+
+    # Apply filtering if possible
+    for col, value in filters.items():
+        if value is not None:
+            if col not in df.columns:
+                raise ValueError(f"Cannot filter by '{col}' because it is not present in dataframe '{which}'.")
+            df = df[df[col] == value]
+
+    return df
+
+    # ----------------------------------
+    # == Methods to compute PSTH data ==
+    # ----------------------------------
 
 
     def compute_psth_per_trial(self, overwrite: bool = False):
@@ -230,6 +305,9 @@ class PSTHExtractor:
         self.avg_psth_per_category_and_interactivity = pd.DataFrame(rows)
         logger.info(f"Computed average PSTH for {len(self.avg_psth_per_category_and_interactivity)} unit-category-interactivity combinations.")
 
+#---------------------------------------------------
+# == Support functions for PSTH computing methods ==
+#---------------------------------------------------
 
 def _process_session_for_psth(
     session_name,
