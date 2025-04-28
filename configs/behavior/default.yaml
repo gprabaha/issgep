@@ -1,0 +1,9 @@
+# Default config for training behavior models
+
+model_type: ExponentialForaging
+
+# Placeholder for data locations, training hyperparameters
+data_path: data/processed/
+save_path: outputs/models/behavior/
+learning_rate: 0.01
+epochs: 50
