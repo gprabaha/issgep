@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 
+import pdb
+
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +32,9 @@ class PCProjector:
         Projects avg firing rates by category and saves the result in a DataFrame structure.
         """
         logger.info("Fetching avg PSTH by category...")
-        df = self.psth_extractor.get_psth(which="by_category")
+        # df = self.psth_extractor.get_psth(which="by_category")
+        df = self.psth_extractor.get_psth(which="trial_wise")
+        pdb.set_trace()
 
         categories_to_use = self.config.categories_to_include
         if categories_to_use is None:

@@ -27,6 +27,8 @@ from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.features.psth_extractor import PSTHExtractor
 from socialgaze.features.pc_projector import PCProjector
 
+from socialgaze.specs.pca_specs import PCASPECS
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
