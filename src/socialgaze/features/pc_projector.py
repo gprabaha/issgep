@@ -3,7 +3,7 @@
 import logging
 import os
 import json
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
@@ -29,6 +29,7 @@ class PCProjector:
         self.pc_fit_models: Dict[str, Dict[str, PCA]] = {}  # fit_name -> region -> PCA
         self.unit_and_category_orders: Dict[str, Dict[str, Dict]] = {}  # fit_name -> region -> order dict
         self.pc_projection_dfs: Dict[str, Dict[str, pd.DataFrame]] = {}  # fit__transform -> region -> projection
+        self.pc_projection_meta: Dict[str, Dict] = {}  # fit__transform -> metadata dict
 
     def fit(self, fit_spec: PCAFitSpec):
         logger.info(f"Fitting PCA using: {fit_spec.name}")
@@ -74,12 +75,12 @@ class PCProjector:
 
         key = f"{fit_spec_name}__{transform_spec.name}"
         self.pc_projection_dfs[key] = {}
+        self.pc_projection_meta[key] = {"fit": fit_spec_name, "transform": transform_spec.name}
 
         for region in df["region"].unique():
             region_df = df[df["region"] == region]
 
-            pca = self._load_or_get_fit_model(fit_spec_name, region)
-            orders = self._load_or_get_fit_orders(fit_spec_name, region)
+            pca, orders = self.get_fit(fit_spec_name, region)
 
             pop_mat, unit_order, category_order = self._build_population_matrix(region_df, category_order=orders["category_order"])
             projected = pca.transform(pop_mat)
@@ -92,7 +93,22 @@ class PCProjector:
                 get_pc_projection_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name, region)
             )
             with open(get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name), "w") as f:
-                json.dump({"fit": fit_spec_name, "transform": transform_spec.name}, f, indent=2)
+                json.dump(self.pc_projection_meta[key], f, indent=2)
+
+    def get_fit(self, fit_name: str, region: str) -> Tuple[PCA, Dict]:
+        pca = self._load_or_get_fit_model(fit_name, region)
+        orders = self._load_or_get_fit_orders(fit_name, region)
+        return pca, orders
+
+    def get_projection(self, fit_name: str, transform_name: str, region: str) -> Tuple[pd.DataFrame, Dict]:
+        key = f"{fit_name}__{transform_name}"
+        if key not in self.pc_projection_dfs:
+            self.pc_projection_dfs[key] = {}
+        if region not in self.pc_projection_dfs[key]:
+            self.pc_projection_dfs[key][region] = self.load_projection(fit_name, transform_name, region)
+        if key not in self.pc_projection_meta:
+            self.pc_projection_meta[key] = self.load_projection_meta(fit_name, transform_name)
+        return self.pc_projection_dfs[key][region], self.pc_projection_meta[key]
 
     def _get_filtered_psth_df(self, trialwise, categories, split_by_interactive, for_fit):
         if trialwise:
