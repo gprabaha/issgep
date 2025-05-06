@@ -5,7 +5,7 @@ Script: 02_pc_projection.py
 
 Description:
     This script initializes all necessary data/config objects and runs PCA on 
-    population-averaged firing rates grouped by fixation category.
+    population-averaged firing rates grouped by fixation category or interactivity.
     The resulting PCA fits and projections are saved to disk for downstream analyses.
 
 Run:
@@ -27,7 +27,7 @@ from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.features.psth_extractor import PSTHExtractor
 from socialgaze.features.pc_projector import PCProjector
 
-from socialgaze.specs.pca_specs import PCASPECS
+from socialgaze.specs.pca_specs import FIT_SPECS, TRANSFORM_SPECS
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -60,27 +60,22 @@ def main():
     )
 
     try:
-        logger.info("Loading PSTH data...")
-        psth_extractor.load_dataframes(which=["by_category"])
-
-        logger.info("Creating PC projection object...")
+        logger.info("Creating PC projector...")
         pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
 
-        logger.info("Starting PCA projection on average firing rates...")
-        pc_projector.project_avg_firing_rate_by_category()
+        for fit_spec in FIT_SPECS:
+            logger.info(f"Running PCA fit: {fit_spec.name}")
+            pc_projector.fit(fit_spec)
 
-        logger.info("Saving projections and unit/category orders...")
-        pc_projector.save_dataframes()
+        for fit_spec in FIT_SPECS:
+            for transform_spec in TRANSFORM_SPECS:
+                logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
+                pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
 
         logger.info("PCA projection script completed successfully.")
 
-        # Print heads for quick sanity check
-        for region, df in pc_projector.pc_projection_dfs.items():
-            print(f"\n--- PC projections for region: {region} ---")
-            print(df.head())
-
     except Exception as e:
-        logger.exception(f"PC Projection failed: {e}")
+        logger.exception(f"PCA projection failed: {e}")
 
 
 if __name__ == "__main__":
