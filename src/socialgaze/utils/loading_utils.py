@@ -9,6 +9,24 @@ from scipy.io import loadmat
 
 logger = logging.getLogger(__name__)
 
+def load_pickle(path: Path):
+    """
+    Load any Python object from a pickle file.
+
+    Parameters:
+    - path (Path): The path to the pickle file.
+
+    Returns:
+    - The loaded Python object.
+    """
+    try:
+        with open(path, 'rb') as f:
+            obj = pickle.load(f)
+        logger.info(f"Loaded pickle from: {path}")
+        return obj
+    except Exception as e:
+        logger.error(f"Failed to load pickle from {path}: {e}")
+        raise
 
 def load_config_from_json(config_path: str) -> Dict[str, Any]:
     """

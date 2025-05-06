@@ -1,154 +1,167 @@
 # src/socialgaze/features/pc_projector.py
 
 import logging
-import glob
+import os
+import json
 from typing import Optional, List, Dict
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 
-import pdb
+from socialgaze.utils.saving_utils import save_df_to_pkl, save_pickle
+from socialgaze.utils.loading_utils import load_df_from_pkl, load_pickle
+from socialgaze.utils.path_utils import (
+    get_pc_fit_model_path,
+    get_pc_fit_orders_path,
+    get_pc_projection_path,
+    get_pc_projection_meta_path,
+)
+from socialgaze.specs.pca_specs import PCAFitSpec, PCATransformSpec
 
 logger = logging.getLogger(__name__)
 
 
 class PCProjector:
     def __init__(self, config, psth_extractor):
-        """
-        Initializes the PCProjector object.
-
-        Args:
-            config: PCAConfig object containing PCA parameters.
-            psth_extractor: PSTHExtractor object with PSTH dataframes.
-        """
         self.config = config
         self.psth_extractor = psth_extractor
 
-        self.pc_fit_models: Dict[str, PCA] = {}  # region -> fitted PCA
-        self.pc_projection_dfs: Dict[str, pd.DataFrame] = {}  # region -> dataframe of projections
-        self.unit_and_category_orders: Dict[str, Dict[str, List[str]]] = {}  # region -> {'unit_order': [...], 'category_order': [...]}
+        self.pc_fit_models: Dict[str, Dict[str, PCA]] = {}  # fit_name -> region -> PCA
+        self.unit_and_category_orders: Dict[str, Dict[str, Dict]] = {}  # fit_name -> region -> order dict
+        self.pc_projection_dfs: Dict[str, Dict[str, pd.DataFrame]] = {}  # fit__transform -> region -> projection
 
-    def project_avg_firing_rate_by_category(self):
-        """
-        Projects avg firing rates by category and saves the result in a DataFrame structure.
-        """
-        logger.info("Fetching avg PSTH by category...")
-        # df = self.psth_extractor.get_psth(which="by_category")
-        df = self.psth_extractor.get_psth(which="trial_wise")
-        pdb.set_trace()
+    def fit(self, fit_spec: PCAFitSpec):
+        logger.info(f"Fitting PCA using: {fit_spec.name}")
 
-        categories_to_use = self.config.categories_to_include
-        if categories_to_use is None:
-            categories_to_use = df["category"].unique().tolist()
+        df = self._get_filtered_psth_df(
+            trialwise=fit_spec.trialwise,
+            categories=fit_spec.categories,
+            split_by_interactive=fit_spec.split_by_interactive,
+            for_fit=True
+        )
 
-        logger.info(f"Using categories: {categories_to_use}")
+        self.pc_fit_models[fit_spec.name] = {}
+        self.unit_and_category_orders[fit_spec.name] = {}
 
-        df = df[df["category"].isin(categories_to_use)]
-
-        if "region" not in df.columns:
-            raise ValueError("Region column is missing from the avg_psth_per_category dataframe.")
-
-        regions = df["region"].unique()
-
-        for region in regions:
-            logger.info(f"Processing region: {region}")
+        for region in df["region"].unique():
             region_df = df[df["region"] == region]
+            pop_mat, unit_order, category_order = self._build_population_matrix(region_df)
 
-            # Validate: Each (uuid, category) must appear exactly once
-            if region_df.groupby(["unit_uuid", "category"]).size().gt(1).any():
-                raise ValueError(f"Duplicate entries found for region {region}. Each (unit_uuid, category) must be unique.")
-
-            # Build pop matrix
-            pop_mat, unit_order, category_order = self._build_population_matrix(region_df, categories_to_use)
-
-            # Fit PCA
             pca = PCA(n_components=min(20, pop_mat.shape[0]))
-            projected = pca.fit_transform(pop_mat)
+            pca.fit(pop_mat)
 
-            self.pc_fit_models[region] = pca
-            self.unit_and_category_orders[region] = {
+            self.pc_fit_models[fit_spec.name][region] = pca
+            self.unit_and_category_orders[fit_spec.name][region] = {
                 "unit_order": unit_order,
                 "category_order": category_order,
             }
 
-            # Build DataFrame for projection
-            projection_df = self._build_projection_dataframe(projected, unit_order, category_order)
+            save_pickle(pca, get_pc_fit_model_path(self.config.pc_projection_base_dir, fit_spec.name, region))
+            save_pickle(
+                self.unit_and_category_orders[fit_spec.name][region],
+                get_pc_fit_orders_path(self.config.pc_projection_base_dir, fit_spec.name, region)
+            )
 
-            self.pc_projection_dfs[region] = projection_df
+    def project(self, fit_spec_name: str, transform_spec: PCATransformSpec):
+        logger.info(f"Projecting using fit: {fit_spec_name} and transform: {transform_spec.name}")
 
-            logger.info(f"Finished PCA fit and projection for region {region}")
+        df = self._get_filtered_psth_df(
+            trialwise=transform_spec.trialwise,
+            categories=transform_spec.categories,
+            split_by_interactive=transform_spec.split_by_interactive,
+            for_fit=False
+        )
 
-    def _build_population_matrix(self, region_df: pd.DataFrame, categories: List[str]) -> (np.ndarray, List[str], List[str]):
-        """
-        Build the full matrix for PCA.
+        key = f"{fit_spec_name}__{transform_spec.name}"
+        self.pc_projection_dfs[key] = {}
 
-        Returns:
-            pop_mat: (n_units x timepoints * n_categories)
-            unit_order: order of uuids
-            category_order: categories
-        """
+        for region in df["region"].unique():
+            region_df = df[df["region"] == region]
+
+            pca = self._load_or_get_fit_model(fit_spec_name, region)
+            orders = self._load_or_get_fit_orders(fit_spec_name, region)
+
+            pop_mat, unit_order, category_order = self._build_population_matrix(region_df, category_order=orders["category_order"])
+            projected = pca.transform(pop_mat)
+
+            proj_df = self._build_projection_dataframe(projected, unit_order, category_order)
+            self.pc_projection_dfs[key][region] = proj_df
+
+            save_df_to_pkl(
+                proj_df,
+                get_pc_projection_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name, region)
+            )
+            with open(get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name), "w") as f:
+                json.dump({"fit": fit_spec_name, "transform": transform_spec.name}, f, indent=2)
+
+    def _get_filtered_psth_df(self, trialwise, categories, split_by_interactive, for_fit):
+        if trialwise:
+            df = self.psth_extractor.get_psth("trial_wise")
+        elif split_by_interactive:
+            df = self.psth_extractor.get_psth("by_interactivity")
+        else:
+            df = self.psth_extractor.get_psth("by_category")
+
+        if categories is not None:
+            df = df[df["category"].isin(categories)]
+
+        return df
+
+    def _build_population_matrix(self, region_df: pd.DataFrame, category_order: Optional[List[str]] = None):
         unit_uuids = region_df["unit_uuid"].unique()
-        pop_list = []
+        categories = category_order or region_df["category"].unique().tolist()
 
+        pop_list = []
         for uuid in unit_uuids:
             unit_frs = []
             for cat in categories:
                 sub_df = region_df.query("unit_uuid == @uuid and category == @cat")
                 if sub_df.empty:
                     raise ValueError(f"Missing category {cat} for unit {uuid}")
-                unit_frs.append(np.array(sub_df.iloc[0]["avg_firing_rate"]))
-            unit_concat = np.concatenate(unit_frs, axis=0)
-            pop_list.append(unit_concat)
+                fr = sub_df.iloc[0]["avg_firing_rate"] if "avg_firing_rate" in sub_df else sub_df.iloc[0]["firing_rate"]
+                unit_frs.append(np.array(fr))
+            pop_list.append(np.concatenate(unit_frs))
 
         pop_mat = np.stack(pop_list, axis=0)
         return pop_mat, list(unit_uuids), categories
 
     def _build_projection_dataframe(self, projected: np.ndarray, unit_order: List[str], category_order: List[str]) -> pd.DataFrame:
-        """
-        Converts projected PC matrix into a structured dataframe.
-
-        Returns:
-            pd.DataFrame
-        """
         rows = []
         n_units = len(unit_order)
         n_categories = len(category_order)
-
-        pcs_per_category = projected.shape[1] // n_categories
+        pcs_per_cat = projected.shape[1] // n_categories
 
         for i, unit_uuid in enumerate(unit_order):
-            for j, category in enumerate(category_order):
-                start = j * pcs_per_category
-                stop = (j + 1) * pcs_per_category
-                pc_segment = projected[i, start:stop]
+            for j, cat in enumerate(category_order):
+                start, stop = j * pcs_per_cat, (j + 1) * pcs_per_cat
                 rows.append({
                     "unit_uuid": unit_uuid,
-                    "category": category,
-                    "pc_projection": pc_segment.tolist()
+                    "category": cat,
+                    "pc_projection": projected[i, start:stop].tolist(),
                 })
+        return pd.DataFrame(rows)
 
-        df = pd.DataFrame(rows)
-        return df
+    def _load_or_get_fit_model(self, fit_name: str, region: str) -> PCA:
+        if fit_name not in self.pc_fit_models:
+            self.pc_fit_models[fit_name] = {}
+        if region not in self.pc_fit_models[fit_name]:
+            path = get_pc_fit_model_path(self.config.pc_projection_base_dir, fit_name, region)
+            self.pc_fit_models[fit_name][region] = load_pickle(path)
+        return self.pc_fit_models[fit_name][region]
 
-    def save_dataframes(self):
-        """
-        Saves projection dataframes and orders.
-        """
-        logger.info("Saving PC projections and unit/category orders...")
-        for region, df in self.pc_projection_dfs.items():
-            save_df_to_pkl(df, self.config.pc_projection_by_category_path.replace(".pkl", f"_{region}.pkl"))
-        save_df_to_pkl(self.unit_and_category_orders, self.config.pc_orders_path)
-        logger.info("Saved PC projections and orders.")
+    def _load_or_get_fit_orders(self, fit_name: str, region: str) -> Dict:
+        if fit_name not in self.unit_and_category_orders:
+            self.unit_and_category_orders[fit_name] = {}
+        if region not in self.unit_and_category_orders[fit_name]:
+            path = get_pc_fit_orders_path(self.config.pc_projection_base_dir, fit_name, region)
+            self.unit_and_category_orders[fit_name][region] = load_pickle(path)
+        return self.unit_and_category_orders[fit_name][region]
 
-    def load_dataframes(self):
-        """
-        Loads projection dataframes and orders.
-        """
-        logger.info("Loading PC projections and unit/category orders...")
-        projection_paths = glob.glob(self.config.pc_projection_by_category_path.replace(".pkl", "_*.pkl"))
-        for path in projection_paths:
-            region = path.split("_")[-1].replace(".pkl", "")
-            self.pc_projection_dfs[region] = load_df_from_pkl(path)
+    def load_projection(self, fit_name: str, transform_name: str, region: str):
+        path = get_pc_projection_path(self.config.pc_projection_base_dir, fit_name, transform_name, region)
+        return load_df_from_pkl(path)
 
-        self.unit_and_category_orders = load_df_from_pkl(self.config.pc_orders_path)
-        logger.info("Loaded PC projections and orders.")
+    def load_projection_meta(self, fit_name: str, transform_name: str):
+        path = get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_name, transform_name)
+        with open(path, "r") as f:
+            return json.load(f)

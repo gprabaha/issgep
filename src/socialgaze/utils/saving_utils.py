@@ -12,6 +12,20 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def save_pickle(obj: Any, path: Path, protocol: int = pickle.HIGHEST_PROTOCOL) -> None:
+    """
+    Save any Python object to a pickle file.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'wb') as f:
+            pickle.dump(obj, f, protocol=protocol)
+        logger.info(f"Saved pickle to: {path}")
+    except Exception as e:
+        logger.error(f"Failed to save pickle to {path}: {e}")
+        raise
+
+
 def save_df_to_pkl(df: pd.DataFrame, path: Path, protocol: int = pickle.HIGHEST_PROTOCOL) -> None:
     """
     Save a pandas DataFrame to a pickle file.
