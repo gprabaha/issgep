@@ -5,33 +5,71 @@ from typing import List, Optional
 
 
 @dataclass(frozen=True)
-class PCASpec:
+class PCAFitSpec:
     name: str
-    fit_type: str  # 'avg' or 'trial_wise'
-    fit_categories: Optional[List[str]] = None
-    fit_interactive_only: Optional[bool] = None
-    transform_type: str = "trial_wise"
-    transform_categories: Optional[List[str]] = None
-    transform_interactive_only: Optional[bool] = None
+    trialwise: bool
+    categories: Optional[List[str]] = None
+    split_by_interactive: Optional[bool] = None
 
 
-PCASPECS = [
-    PCASpec(
-        name="avg_face_vs_object_transform_trialwise",
-        fit_type="avg",
-        fit_categories=["face", "object"],
-        fit_interactive_only=None,
-        transform_type="trial_wise",
-        transform_categories=["face", "object"],
-        transform_interactive_only=None,
+@dataclass(frozen=True)
+class PCATransformSpec:
+    name: str
+    trialwise: bool
+    categories: Optional[List[str]] = None
+    split_by_interactive: Optional[bool] = None
+
+
+FIT_SPECS = [
+    PCAFitSpec(
+        name="fit_avg_face_obj",
+        trialwise=False,
+        categories=["face", "object"],
+        split_by_interactive=None,
     ),
-    PCASpec(
-        name="avg_face_noninteractive_transform_face_interactive",
-        fit_type="avg",
-        fit_categories=["face"],
-        fit_interactive_only=False,
-        transform_type="trial_wise",
-        transform_categories=["face"],
-        transform_interactive_only=True,
+    PCAFitSpec(
+        name="fit_trialwise_face_obj",
+        trialwise=True,
+        categories=["face", "object"],
+        split_by_interactive=None,
+    ),
+    PCAFitSpec(
+        name="fit_avg_interactive_and_noninteractive_face_obj",
+        trialwise=False,
+        categories=["face", "object"],
+        split_by_interactive=True,
+    ),
+    PCAFitSpec(
+        name="fit_trialwise_interactive_and_noninteractive_face_obj",
+        trialwise=True,
+        categories=["face", "object"],
+        split_by_interactive=True,
+    ),
+]
+
+TRANSFORM_SPECS = [
+    PCATransformSpec(
+        name="transform_avg_face_obj",
+        trialwise=False,
+        categories=["face", "object"],
+        split_by_interactive=None,
+    ),
+    PCATransformSpec(
+        name="transform_trialwise_face_obj",
+        trialwise=True,
+        categories=["face", "object"],
+        split_by_interactive=None,
+    ),
+    PCATransformSpec(
+        name="transform_avg_interactive_and_noninteractive_face_obj",
+        trialwise=False,
+        categories=["face", "object"],
+        split_by_interactive=True,
+    ),
+    PCATransformSpec(
+        name="transform_trialwise_interactive_and_noninteractive_face_obj",
+        trialwise=True,
+        categories=["face", "object"],
+        split_by_interactive=True,
     ),
 ]
