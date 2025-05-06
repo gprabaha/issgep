@@ -1,5 +1,6 @@
 # src/socialgaze/utils/path_utils.py
 
+import os
 from pathlib import Path
 from typing import Dict, Union
 
@@ -379,6 +380,23 @@ def get_sbatch_script_path(job_out_dir: Path, job_name: str) -> Path:
     scripts_dir = Path(job_out_dir) / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     return scripts_dir / f"dsq-joblist_{job_name}.sh"
+
+
+# ---------------------------------
+# == PC fit and projection paths ==
+# ---------------------------------
+
+def get_pc_fit_model_path(base_dir, fit_name, region):
+    return os.path.join(base_dir, fit_name, f"fit_model_{region}.pkl")
+
+def get_pc_fit_orders_path(base_dir, fit_name, region):
+    return os.path.join(base_dir, fit_name, f"orders_{region}.pkl")
+
+def get_pc_projection_path(base_dir, fit_name, transform_name, region):
+    return os.path.join(base_dir, f"{fit_name}__{transform_name}", f"projection_{region}.pkl")
+
+def get_pc_projection_meta_path(base_dir, fit_name, transform_name):
+    return os.path.join(base_dir, f"{fit_name}__{transform_name}", "meta.json")
 
 # ------------------------
 # == General path tools ==

@@ -1,6 +1,7 @@
 # src/socialgaze/features/pc_projector.py
 
 import logging
+import glob
 from typing import Optional, List, Dict
 import numpy as np
 import pandas as pd
@@ -144,7 +145,6 @@ class PCProjector:
         Loads projection dataframes and orders.
         """
         logger.info("Loading PC projections and unit/category orders...")
-        import glob
         projection_paths = glob.glob(self.config.pc_projection_by_category_path.replace(".pkl", "_*.pkl"))
         for path in projection_paths:
             region = path.split("_")[-1].replace(".pkl", "")
