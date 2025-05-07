@@ -123,6 +123,14 @@ class PCProjector:
 
         return df
 
+
+##!! This part is not quite correct we have to make a matrix of shape n_units x (n_categories x n_trials x n_timepoints)
+##!! For trial-wise each session will have a different number of face/object trials
+##!! We have to find the max number of fixations that exist for face or object (int/non-int face and obj too if we split by interactivity)
+##!! Then we have to sample N fixations for each category/interactiveness for each session and then concatenate n_categories x n_fixations for each unit
+##!! When creating the data matrix, we should have some sort of metadata of n_samples per category and n_trials per category etc for future unpacking
+
+
     def _build_population_matrix(self, region_df: pd.DataFrame, category_order: Optional[List[str]] = None):
         unit_uuids = region_df["unit_uuid"].unique()
         categories = category_order or region_df["category"].unique().tolist()

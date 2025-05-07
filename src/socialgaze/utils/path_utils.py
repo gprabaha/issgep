@@ -174,6 +174,9 @@ def get_spike_times_mat_path(config) -> Path:
 # == Processed behavioral and spike data df pickle paths ==
 # ---------------------------------------------------------
 
+def get_ephys_days_df_pkl_path(config) -> Path:
+    return config.processed_data_dir / "ephys_days_and_monkeys.pkl"
+
 def get_position_df_pkl_path(config) -> Path:
     return config.processed_data_dir / "positions.pkl"
 
