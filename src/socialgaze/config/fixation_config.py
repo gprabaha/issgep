@@ -46,7 +46,6 @@ class FixationConfig(BaseConfig):
         self.use_parallel = False
 
         self._assign_paths()
-        self.save_to_json()
 
     def _assign_paths(self):
         self.fixation_config_path = get_fixation_config_json_path(self.config_folder)

@@ -21,12 +21,12 @@ class PCATransformSpec:
 
 
 FIT_SPECS = [
-    PCAFitSpec(
-        name="fit_avg_face_obj",
-        trialwise=False,
-        categories=["face", "object"],
-        split_by_interactive=None,
-    ),
+    # PCAFitSpec(
+    #     name="fit_avg_face_obj",
+    #     trialwise=False,
+    #     categories=["face", "object"],
+    #     split_by_interactive=None,
+    # ),
     PCAFitSpec(
         name="fit_trialwise_face_obj",
         trialwise=True,

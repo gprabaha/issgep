@@ -19,6 +19,8 @@ Run:
 
 import logging
 
+import pdb
+
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.config.psth_config import PSTHConfig
@@ -58,6 +60,8 @@ def main():
         fixation_detector=fixation_detector,
         interactivity_detector=interactivity_detector,
     )
+
+    pdb.set_trace()
 
     try:
         logger.info("Starting per-fixation PSTH extraction...")
