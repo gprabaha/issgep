@@ -389,17 +389,67 @@ def get_sbatch_script_path(job_out_dir: Path, job_name: str) -> Path:
 # == PC fit and projection paths ==
 # ---------------------------------
 
-def get_pc_fit_model_path(base_dir, fit_name, region):
-    return os.path.join(base_dir, fit_name, f"fit_model_{region}.pkl")
 
-def get_pc_fit_orders_path(base_dir, fit_name, region):
-    return os.path.join(base_dir, fit_name, f"orders_{region}.pkl")
+def get_pc_fit_model_path(base_dir: str, fit_name: str, region: str) -> Path:
+    """
+    Returns the path to the saved PCA fit model file for a given fit name and brain region.
 
-def get_pc_projection_path(base_dir, fit_name, transform_name, region):
-    return os.path.join(base_dir, f"{fit_name}__{transform_name}", f"projection_{region}.pkl")
+    Args:
+        base_dir (str): Base directory where PCA results are stored.
+        fit_name (str): Name of the PCA fitting specification.
+        region (str): Brain region name (e.g., 'ofc').
 
-def get_pc_projection_meta_path(base_dir, fit_name, transform_name):
-    return os.path.join(base_dir, f"{fit_name}__{transform_name}", "meta.json")
+    Returns:
+        Path: Path to the fit model .pkl file.
+    """
+    return Path(base_dir) / fit_name / f"fit_model_{region}.pkl"
+
+
+def get_pc_fit_orders_path(base_dir: str, fit_name: str, region: str) -> Path:
+    """
+    Returns the path to the unit and category order file for a given PCA fit.
+
+    Args:
+        base_dir (str): Base directory where PCA results are stored.
+        fit_name (str): Name of the PCA fitting specification.
+        region (str): Brain region name.
+
+    Returns:
+        Path: Path to the .pkl file containing order metadata.
+    """
+    return Path(base_dir) / fit_name / f"orders_{region}.pkl"
+
+
+def get_pc_projection_path(base_dir: str, fit_name: str, transform_name: str, region: str) -> Path:
+    """
+    Returns the path to the projection result file for a given fit/transform pair and region.
+
+    Args:
+        base_dir (str): Base directory where PCA results are stored.
+        fit_name (str): Name of the PCA fitting specification.
+        transform_name (str): Name of the PCA transform specification.
+        region (str): Brain region name.
+
+    Returns:
+        Path: Path to the projection .pkl file.
+    """
+    return Path(base_dir) / f"{fit_name}__{transform_name}" / f"projection_{region}.pkl"
+
+
+def get_pc_projection_meta_path(base_dir: str, fit_name: str, transform_name: str) -> Path:
+    """
+    Returns the path to the metadata file associated with a given PCA projection.
+
+    Args:
+        base_dir (str): Base directory where PCA results are stored.
+        fit_name (str): Name of the PCA fitting specification.
+        transform_name (str): Name of the PCA transform specification.
+
+    Returns:
+        Path: Path to the projection metadata .json file.
+    """
+    return Path(base_dir) / f"{fit_name}__{transform_name}" / "meta.json"
+
 
 # ------------------------
 # == General path tools ==

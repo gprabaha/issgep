@@ -61,8 +61,6 @@ def main():
         interactivity_detector=interactivity_detector,
     )
 
-    pdb.set_trace()
-
     try:
         logger.info("Starting per-fixation PSTH extraction...")
         extractor.compute_psth_per_trial(overwrite=False)

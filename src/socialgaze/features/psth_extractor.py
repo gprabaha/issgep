@@ -262,11 +262,14 @@ class PSTHExtractor:
             for _, row in group.iterrows():
                 rows.append({
                     "session_name": row["session_name"],
+                    "agent": row.get("agent"),
                     "unit_uuid": unit_uuid,
+                    "region": row.get("region"),
+                    "channel": row.get("channel"),
                     "category": category,
                     "avg_firing_rate": mean_psth.tolist()
                 })
-                break  # Only need one session/run info per group
+                break  # Only need one row to copy the metadata
 
         self.avg_psth_per_category = pd.DataFrame(rows)
         logger.info(f"Computed average PSTH for {len(self.avg_psth_per_category)} unit-category combinations.")
@@ -294,12 +297,15 @@ class PSTHExtractor:
             for _, row in group.iterrows():
                 rows.append({
                     "session_name": row["session_name"],
+                    "agent": row.get("agent"),
                     "unit_uuid": unit_uuid,
+                    "region": row.get("region"),
+                    "channel": row.get("channel"),
                     "category": category,
                     "is_interactive": is_interactive,
                     "avg_firing_rate": mean_psth.tolist()
                 })
-                break  # Only need one session info per group
+                break
 
         self.avg_psth_per_category_and_interactivity = pd.DataFrame(rows)
         logger.info(f"Computed average PSTH for {len(self.avg_psth_per_category_and_interactivity)} unit-category-interactivity combinations.")
