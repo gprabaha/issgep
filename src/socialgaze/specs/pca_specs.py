@@ -73,3 +73,13 @@ TRANSFORM_SPECS = [
         split_by_interactive=True,
     ),
 ]
+
+def get_all_fit_transform_pairs():
+    """
+    Returns all (fit_spec, transform_spec) pairs by combining each fit spec
+    with every transform spec. This is consistent with how projections are done
+    in 02_pc_projection.py.
+    """
+    return [(fit, transform) for fit in FIT_SPECS for transform in TRANSFORM_SPECS]
+
+

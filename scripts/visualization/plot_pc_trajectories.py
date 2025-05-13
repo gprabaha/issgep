@@ -1,15 +1,15 @@
-# scripts/neural_analysis/02_pc_projection.py
+# scripts/visualization/plot_pc_trajectories.py
 
 """
-Script: 02_pc_projection.py
+Script: plot_pc_trajectories.py
 
 Description:
-    This script initializes all necessary data/config objects and runs PCA on 
-    population-averaged firing rates grouped by fixation category or interactivity.
-    The resulting PCA fits and projections are saved to disk for downstream analyses.
+    This script loads PC projections from disk and visualizes the top 3 PC dimensions 
+    over time using 3D trajectories. It loops over all fit-transform pairs defined in 
+    PCA specs and uses the ThreeDPlotter class to generate plots for each brain region.
 
 Run:
-    python scripts/neural_analysis/02_pc_projection.py
+    python scripts/visualization/pc_projection_plot.py
 """
 
 import logging
@@ -18,7 +18,7 @@ from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.config.psth_config import PSTHConfig
 from socialgaze.config.interactivity_config import InteractivityConfig
-from socialgaze.config.pca_config import PCAConfig
+from socialgaze.config.plotting_config import PlottingConfig
 
 from socialgaze.data.gaze_data import GazeData
 from socialgaze.data.spike_data import SpikeData
@@ -26,6 +26,7 @@ from socialgaze.features.fixation_detector import FixationDetector
 from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.features.psth_extractor import PSTHExtractor
 from socialgaze.features.pc_projector import PCProjector
+from socialgaze.visualization.3d_plotter import ThreeDPlotter
 
 from socialgaze.specs.pca_specs import FIT_SPECS, TRANSFORM_SPECS
 
@@ -38,9 +39,9 @@ def main():
     logger.info("Initializing config objects...")
     base_config = BaseConfig()
     fixation_config = FixationConfig()
-    neural_config = PSTHConfig()
+    psth_config = PSTHConfig()
     interactivity_config = InteractivityConfig()
-    pca_config = PCAConfig()
+    plotting_config = PlottingConfig()
 
     logger.info("Initializing data managers...")
     gaze_data = GazeData(config=base_config)
@@ -52,30 +53,29 @@ def main():
 
     logger.info("Creating PSTH extractor...")
     psth_extractor = PSTHExtractor(
-        config=neural_config,
+        config=psth_config,
         gaze_data=gaze_data,
         spike_data=spike_data,
         fixation_detector=fixation_detector,
         interactivity_detector=interactivity_detector,
     )
 
-    try:
-        logger.info("Creating PC projector...")
-        pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
+    logger.info("Creating PC projector and 3D plotter...")
+    projector = PCProjector(config=plotting_config, psth_extractor=psth_extractor)
+    plotter = ThreeDPlotter(config=plotting_config)
 
-        for fit_spec in FIT_SPECS:
-            logger.info(f"Running PCA fit: {fit_spec.name}")
-            pc_projector.fit(fit_spec)
+    for fit_spec in FIT_SPECS:
+        for transform_spec in TRANSFORM_SPECS:
+            key = f"{fit_spec.name}__{transform_spec.name}"
+            for region in projector.pc_projection_dfs.get(key, {}).keys():
+                try:
+                    logger.info(f"Plotting: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")
+                    df, _ = projector.get_projection(fit_spec.name, transform_spec.name, region)
+                    plotter.plot_pc_trajectories_all_trials(df, fit_spec.name, transform_spec.name, region)
+                except Exception as e:
+                    logger.warning(f"Plotting failed for {key} in {region}: {e}")
 
-        for fit_spec in FIT_SPECS:
-            for transform_spec in TRANSFORM_SPECS:
-                logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
-                pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
-
-        logger.info("PCA projection script completed successfully.")
-
-    except Exception as e:
-        logger.exception(f"PCA projection failed: {e}")
+    logger.info("PC projection plotting completed.")
 
 
 if __name__ == "__main__":

@@ -451,6 +451,9 @@ def get_pc_projection_meta_path(base_dir: str, fit_name: str, transform_name: st
     return Path(base_dir) / f"{fit_name}__{transform_name}" / "meta.pkl"
 
 
+def get_pc_plot_path(base_dir, fit_name, transform_name, region):
+    return os.path.join(base_dir, f"{fit_name}__{transform_name}", region)
+
 # ------------------------
 # == General path tools ==
 # ------------------------

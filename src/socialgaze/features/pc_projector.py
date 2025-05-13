@@ -206,7 +206,7 @@ class PCProjector:
             category_order = [
                 f"{cat}_{inter}" if inter is not None else cat
                 for cat, inter in all_keys
-            ]
+            
             pop_list = []
 
             for unit_uuid in unit_uuids:
@@ -320,8 +320,6 @@ class PCProjector:
                 })
 
         return pd.DataFrame(rows)
-
-
 
 
 
