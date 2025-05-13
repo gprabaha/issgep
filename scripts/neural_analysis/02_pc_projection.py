@@ -63,9 +63,9 @@ def main():
         logger.info("Creating PC projector...")
         pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
 
-        for fit_spec in FIT_SPECS:
-            logger.info(f"Running PCA fit: {fit_spec.name}")
-            pc_projector.fit(fit_spec)
+        # for fit_spec in FIT_SPECS:
+        #     logger.info(f"Running PCA fit: {fit_spec.name}")
+        #     pc_projector.fit(fit_spec)
 
         for fit_spec in FIT_SPECS:
             for transform_spec in TRANSFORM_SPECS:

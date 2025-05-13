@@ -47,7 +47,7 @@ class PCProjector:
         for region in df["region"].unique():
             region_df = df[df["region"] == region]
             pop_mat, unit_order, category_order, min_fixations, _ = self._build_population_matrix(region_df, fit_spec)
-
+            
             pca = PCA(n_components=min(20, pop_mat.shape[0]))
             pca.fit(pop_mat)
 
@@ -64,6 +64,7 @@ class PCProjector:
 
     def project(self, fit_spec_name: str, transform_spec: PCATransformSpec):
         logger.info(f"Projecting using fit: {fit_spec_name} and transform: {transform_spec.name}")
+        
         df = self._get_filtered_psth_df(
             trialwise=transform_spec.trialwise,
             categories=transform_spec.categories,
@@ -79,23 +80,39 @@ class PCProjector:
 
         for region in df["region"].unique():
             region_df = df[df["region"] == region]
+
+            # Get fitted PCA model and condition orders
             pca, orders = self.get_fit(fit_spec_name, region)
 
-            pop_mat, unit_order, category_order, min_fixations, sample_metadata = self._build_population_matrix(region_df, transform_spec)
-            projected = pca.transform(pop_mat)
-
-            proj_df = self._reshape_projection_as_timeseries_dataframe(
-                projected, sample_metadata, region, n_components=pca.n_components_
+            # Build population matrix and metadata
+            pop_mat, unit_order, category_order, min_fixations, sample_metadata = self._build_population_matrix(
+                region_df, transform_spec
             )
 
-            self.pc_projection_dfs[key][region] = proj_df
+            # Project and reshape
+            projected = pca.transform(pop_mat)
+            proj_df = self._reshape_projection_as_timeseries_dataframe(
+                projected=projected,
+                sample_metadata=sample_metadata,
+                region=region,
+                n_components=pca.n_components_,
+                transform_spec=transform_spec,
+                min_fixations=min_fixations
+            )
 
+            # Store and save
+            self.pc_projection_dfs[key][region] = proj_df
             self.pc_projection_meta[key]["trials_per_category"] = min_fixations
             self.pc_projection_meta[key]["category_order"] = category_order
 
-            save_df_to_pkl(proj_df, get_pc_projection_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name, region))
-            with open(get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name), "w") as f:
-                json.dump(self.pc_projection_meta[key], f, indent=2)
+            save_df_to_pkl(
+                proj_df,
+                get_pc_projection_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name, region)
+            )
+            save_pickle(
+                self.pc_projection_meta[key],
+                get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name)
+            )
 
 
     def _get_filtered_psth_df(self, trialwise, categories, split_by_interactive, agent=None):
@@ -127,14 +144,16 @@ class PCProjector:
                     unit_frs = []
                     for cat in category_order:
                         row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
+
                         if row.shape[0] != 1:
                             raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
                         fr = np.array(row.iloc[0]["avg_firing_rate"])
                         for t in range(len(fr)):
                             sample_metadata.append({
+                                "agent": row.iloc[0]["agent"],
                                 "unit_uuid": unit_uuid,
                                 "category": cat,
-                                "timepoint_index": t
+                                "timepoint_index": t,
                             })
                         unit_frs.append(fr)
                     pop_list.append(np.concatenate(unit_frs))
@@ -155,6 +174,7 @@ class PCProjector:
                             fr = np.array(row.iloc[0]["avg_firing_rate"])
                             for t in range(len(fr)):
                                 sample_metadata.append({
+                                    "agent": row.iloc[0]["agent"],
                                     "unit_uuid": unit_uuid,
                                     "category": cat,
                                     "interactivity": inter,
@@ -204,6 +224,9 @@ class PCProjector:
                         fr = np.array(row["firing_rate"])
                         for t in range(len(fr)):
                             sample_metadata.append({
+                                "session_name": row["session_name"],
+                                "run_number": row["run_number"],
+                                "agent": row["agent"],
                                 "unit_uuid": unit_uuid,
                                 "category": cat,
                                 "interactivity": inter,
@@ -212,54 +235,94 @@ class PCProjector:
                             })
                         unit_frs.append(fr)
                 pop_list.append(np.concatenate(unit_frs))
-
             pop_mat = np.stack(pop_list, axis=0).T
             return pop_mat, unit_uuids, category_order, min_fixations, sample_metadata
 
 
     def _reshape_projection_as_timeseries_dataframe(
+        self,
         projected: np.ndarray,
         sample_metadata: List[Dict],
         region: str,
-        n_components: int
+        n_components: int,
+        transform_spec: PCATransformSpec,
+        min_fixations: int
     ) -> pd.DataFrame:
         """
         Reshapes PCA projections into one row per PC dimension and condition, with timeseries as a vector.
+        Assumes projected.shape[0] == n_timepoints × n_categories × n_interactivity × n_trials
+
+        Args:
+            projected: np.ndarray of shape (n_samples, n_components)
+            sample_metadata: List of dicts describing each sample (should be repeated over units)
+            region: brain region name
+            n_components: number of PCA components
+            transform_spec: used to check trialwise and interactivity
+            min_fixations: number of trials per category (if trialwise), otherwise 1
 
         Returns:
-            pd.DataFrame with columns:
-            ["region", "PC dimension", "category", "is_interactive", "trial_index", "pc_timeseries"]
+            pd.DataFrame with one row per PC dimension per condition
         """
-        assert projected.shape[0] == len(sample_metadata)
+        # === Step 1: Infer unique timepoints
+        unique_timepoints = sorted(set(meta["timepoint_index"] for meta in sample_metadata))
+        n_timepoints = len(unique_timepoints)
 
-        # Organize projected rows by grouping keys
-        grouped = {}
-        for i, meta in enumerate(sample_metadata):
+        # === Step 2: Determine how many projected blocks we expect
+        categories = transform_spec.categories or sorted(set(meta["category"] for meta in sample_metadata))
+        n_categories = len(categories)
+        n_interactive = 2 if transform_spec.split_by_interactive else 1
+        n_trials = min_fixations if transform_spec.trialwise else 1
+
+        expected_rows = n_timepoints * n_categories * n_interactive * n_trials
+        assert projected.shape[0] == expected_rows, (
+            f"Expected {expected_rows} rows in projected, got {projected.shape[0]} "
+            f"(n_timepoints={n_timepoints}, n_categories={n_categories}, "
+            f"n_interactive={n_interactive}, n_trials={n_trials})"
+        )
+
+        # === Step 3: Group by condition — one entry per condition, ignore units and timepoints
+        grouped_keys = []
+        seen_keys = set()
+        for meta in sample_metadata:
             key = (
                 meta["category"],
                 meta.get("interactivity", None),
                 meta.get("trial_index", None),
+                meta.get("session_name", None),
+                meta.get("run_number", None),
+                meta.get("agent", None),
             )
-            if key not in grouped:
-                grouped[key] = []
-            grouped[key].append((meta["timepoint_index"], projected[i]))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                grouped_keys.append(key)
 
-        # Flatten to one row per PC dimension
+        # === Step 4: Sort keys (optional but ensures deterministic output)
+        grouped_keys = sorted(grouped_keys)
+
+        # === Step 5: Iterate and extract projections
         rows = []
-        for (cat, inter, trial), values in grouped.items():
-            # Sort by timepoint_index
-            values = sorted(values, key=lambda x: x[0])
-            matrix = np.stack([v[1] for v in values], axis=0)  # shape: (timepoints, n_components)
+        for i, (cat, inter, trial, session, run, agent) in enumerate(grouped_keys):
+            start = i * n_timepoints
+            end = start + n_timepoints
+            matrix = projected[start:end]  # shape: (n_timepoints, n_components)
+
             for dim in range(n_components):
                 rows.append({
                     "region": region,
-                    "PC dimension": dim,
+                    "pc_dimension": dim,
                     "category": cat,
                     "is_interactive": inter,
                     "trial_index": trial,
+                    "session": session,
+                    "run": run,
+                    "agent": agent,
                     "pc_timeseries": matrix[:, dim].tolist()
                 })
+
         return pd.DataFrame(rows)
+
+
+
 
 
     def get_fit(self, fit_name, region):
@@ -299,6 +362,5 @@ class PCProjector:
 
     def load_projection_meta(self, fit_name, transform_name):
         path = get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_name, transform_name)
-        with open(path, "r") as f:
-            return json.load(f)
+        return load_df_from_pkl(path)
 

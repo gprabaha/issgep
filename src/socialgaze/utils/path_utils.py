@@ -448,7 +448,7 @@ def get_pc_projection_meta_path(base_dir: str, fit_name: str, transform_name: st
     Returns:
         Path: Path to the projection metadata .json file.
     """
-    return Path(base_dir) / f"{fit_name}__{transform_name}" / "meta.json"
+    return Path(base_dir) / f"{fit_name}__{transform_name}" / "meta.pkl"
 
 
 # ------------------------

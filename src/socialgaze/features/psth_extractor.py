@@ -262,6 +262,7 @@ class PSTHExtractor:
             for _, row in group.iterrows():
                 rows.append({
                     "session_name": row["session_name"],
+                    "run_number": row["run_number"],
                     "agent": row.get("agent"),
                     "unit_uuid": unit_uuid,
                     "region": row.get("region"),
@@ -297,6 +298,7 @@ class PSTHExtractor:
             for _, row in group.iterrows():
                 rows.append({
                     "session_name": row["session_name"],
+                    "run_number": row["run_number"],
                     "agent": row.get("agent"),
                     "unit_uuid": unit_uuid,
                     "region": row.get("region"),
@@ -398,8 +400,8 @@ def _process_fixation_row_for_psth(
     num_bins,
     interactive_periods,
     unit_metadata,
-    do_smoothing=False,
-    smoothing_sigma_bins=2.0,
+    do_smoothing,
+    smoothing_sigma_bins,
 ):
     idx_start = int(row["start"])
     idx_stop = int(row["stop"])
