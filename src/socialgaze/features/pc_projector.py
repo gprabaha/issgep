@@ -2,7 +2,6 @@
 
 
 import pdb
-
 import logging
 import os
 import json
@@ -29,13 +28,13 @@ class PCProjector:
         self.config = config
         self.psth_extractor = psth_extractor
 
-        self.pc_fit_models: Dict[str, Dict[str, PCA]] = {}
-        self.pc_projection_dfs: Dict[str, Dict[str, pd.DataFrame]] = {}
-        self.pc_projection_meta: Dict[str, Dict] = {}
+        self.pc_fit_models = {}
+        self.unit_and_category_orders = {}
+        self.pc_projection_dfs = {}
+        self.pc_projection_meta = {}
 
     def fit(self, fit_spec: PCAFitSpec):
         logger.info(f"Fitting PCA using: {fit_spec.name}")
-
         df = self._get_filtered_psth_df(
             trialwise=fit_spec.trialwise,
             categories=fit_spec.categories,
@@ -43,22 +42,28 @@ class PCProjector:
         )
 
         self.pc_fit_models[fit_spec.name] = {}
+        self.unit_and_category_orders[fit_spec.name] = {}
 
         for region in df["region"].unique():
             region_df = df[df["region"] == region]
-            pop_mat, sample_labels, unit_order = self._build_population_matrix_across_units(region_df, fit_spec)
+            pop_mat, unit_order, category_order, min_fixations, _ = self._build_population_matrix(region_df, fit_spec)
 
-            pca = PCA(n_components=min(20, pop_mat.shape[1]))
+            pca = PCA(n_components=min(20, pop_mat.shape[0]))
             pca.fit(pop_mat)
 
             self.pc_fit_models[fit_spec.name][region] = pca
+            self.unit_and_category_orders[fit_spec.name][region] = {
+                "unit_order": unit_order,
+                "category_order": category_order,
+                "trials_per_category": min_fixations,
+            }
 
             save_pickle(pca, get_pc_fit_model_path(self.config.pc_projection_base_dir, fit_spec.name, region))
-            save_pickle({"unit_order": unit_order}, get_pc_fit_orders_path(self.config.pc_projection_base_dir, fit_spec.name, region))
+            save_pickle(self.unit_and_category_orders[fit_spec.name][region],
+                        get_pc_fit_orders_path(self.config.pc_projection_base_dir, fit_spec.name, region))
 
     def project(self, fit_spec_name: str, transform_spec: PCATransformSpec):
         logger.info(f"Projecting using fit: {fit_spec_name} and transform: {transform_spec.name}")
-
         df = self._get_filtered_psth_df(
             trialwise=transform_spec.trialwise,
             categories=transform_spec.categories,
@@ -74,38 +79,26 @@ class PCProjector:
 
         for region in df["region"].unique():
             region_df = df[df["region"] == region]
+            pca, orders = self.get_fit(fit_spec_name, region)
 
-            pca, order_meta = self.get_fit(fit_spec_name, region)
-            pop_mat, sample_labels, _ = self._build_population_matrix_across_units(region_df, transform_spec, unit_order=order_meta["unit_order"])
+            pop_mat, unit_order, category_order, min_fixations, sample_metadata = self._build_population_matrix(region_df, transform_spec)
             projected = pca.transform(pop_mat)
 
-            proj_df = pd.DataFrame(projected, columns=[f"pc{i+1}" for i in range(projected.shape[1])])
-            proj_df = pd.concat([sample_labels.reset_index(drop=True), proj_df], axis=1)
+            proj_df = self._reshape_projection_as_timeseries_dataframe(
+                projected, sample_metadata, region, n_components=pca.n_components_
+            )
+
             self.pc_projection_dfs[key][region] = proj_df
 
-            save_df_to_pkl(
-                proj_df,
-                get_pc_projection_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name, region)
-            )
+            self.pc_projection_meta[key]["trials_per_category"] = min_fixations
+            self.pc_projection_meta[key]["category_order"] = category_order
+
+            save_df_to_pkl(proj_df, get_pc_projection_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name, region))
             with open(get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name), "w") as f:
                 json.dump(self.pc_projection_meta[key], f, indent=2)
 
-    def get_fit(self, fit_name: str, region: str) -> Tuple[PCA, Dict]:
-        pca = self._load_or_get_fit_model(fit_name, region)
-        orders = self._load_or_get_fit_orders(fit_name, region)
-        return pca, orders
 
-    def get_projection(self, fit_name: str, transform_name: str, region: str) -> Tuple[pd.DataFrame, Dict]:
-        key = f"{fit_name}__{transform_name}"
-        if key not in self.pc_projection_dfs:
-            self.pc_projection_dfs[key] = {}
-        if region not in self.pc_projection_dfs[key]:
-            self.pc_projection_dfs[key][region] = self.load_projection(fit_name, transform_name, region)
-        if key not in self.pc_projection_meta:
-            self.pc_projection_meta[key] = self.load_projection_meta(fit_name, transform_name)
-        return self.pc_projection_dfs[key][region], self.pc_projection_meta[key]
-
-    def _get_filtered_psth_df(self, trialwise, categories, split_by_interactive, agent: Optional[str] = None):
+    def _get_filtered_psth_df(self, trialwise, categories, split_by_interactive, agent=None):
         if trialwise:
             df = self.psth_extractor.get_psth("trial_wise")
         elif split_by_interactive:
@@ -116,88 +109,175 @@ class PCProjector:
         if categories is not None:
             df = df[df["category"].isin(categories)]
 
-        if "agent" in df.columns:
-            if agent is not None:
-                df = df[df["agent"] == agent]
-            else:
-                df = df[df["agent"] == "m1"]
-
+        df = df[df["agent"] == (agent or "m1")]
         return df
 
-    def _build_population_matrix_across_units(
-        self,
-        region_df: pd.DataFrame,
-        specs: Union[PCAFitSpec, PCATransformSpec],
-        unit_order: Optional[List[str]] = None
-    ) -> Tuple[np.ndarray, pd.DataFrame, List[str]]:
+    def _build_population_matrix(self, region_df, specs):
         trialwise = specs.trialwise
         split_by_interactive = specs.split_by_interactive
         base_categories = specs.categories or sorted(region_df["category"].unique())
-
-        if unit_order is None:
-            unit_order = sorted(region_df["unit_uuid"].unique())
-
-        rows = []
-        meta = []
+        unit_uuids = sorted(region_df["unit_uuid"].unique())
+        sample_metadata = []
 
         if not trialwise:
-            for cat in base_categories:
-                if split_by_interactive:
-                    for inter in ["interactive", "non-interactive"]:
-                        trial_df = region_df.query("category == @cat and is_interactive == @inter")
-                        vec = []
-                        for unit in unit_order:
-                            sub = trial_df[trial_df["unit_uuid"] == unit]
-                            if sub.empty:
-                                raise ValueError(f"Missing data for {unit}, {cat}_{inter}")
-                            vec.append(np.mean(sub.iloc[0]["avg_firing_rate"]))
-                        rows.append(vec)
-                        meta.append({"category": cat, "is_interactive": inter})
-                else:
-                    trial_df = region_df.query("category == @cat")
-                    vec = []
-                    for unit in unit_order:
-                        sub = trial_df[trial_df["unit_uuid"] == unit]
-                        if sub.empty:
-                            raise ValueError(f"Missing data for {unit}, {cat}")
-                        vec.append(np.mean(sub.iloc[0]["avg_firing_rate"]))
-                    rows.append(vec)
-                    meta.append({"category": cat})
+            if not split_by_interactive:
+                category_order = base_categories
+                pop_list = []
+                for unit_uuid in unit_uuids:
+                    unit_frs = []
+                    for cat in category_order:
+                        row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
+                        if row.shape[0] != 1:
+                            raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
+                        fr = np.array(row.iloc[0]["avg_firing_rate"])
+                        for t in range(len(fr)):
+                            sample_metadata.append({
+                                "unit_uuid": unit_uuid,
+                                "category": cat,
+                                "timepoint_index": t
+                            })
+                        unit_frs.append(fr)
+                    pop_list.append(np.concatenate(unit_frs))
+                pop_mat = np.stack(pop_list, axis=0).T
+                return pop_mat, unit_uuids, category_order, None, sample_metadata
+
+            else:
+                interactive_conditions = ["interactive", "non-interactive"]
+                category_order = [f"{cat}_{inter}" for cat in base_categories for inter in interactive_conditions]
+                pop_list = []
+                for unit_uuid in unit_uuids:
+                    unit_frs = []
+                    for cat in base_categories:
+                        for inter in interactive_conditions:
+                            row = region_df.query("unit_uuid == @unit_uuid and category == @cat and is_interactive == @inter")
+                            if row.shape[0] != 1:
+                                raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, {inter}, got {row.shape[0]}")
+                            fr = np.array(row.iloc[0]["avg_firing_rate"])
+                            for t in range(len(fr)):
+                                sample_metadata.append({
+                                    "unit_uuid": unit_uuid,
+                                    "category": cat,
+                                    "interactivity": inter,
+                                    "timepoint_index": t
+                                })
+                            unit_frs.append(fr)
+                    pop_list.append(np.concatenate(unit_frs))
+                pop_mat = np.stack(pop_list, axis=0).T
+                return pop_mat, unit_uuids, category_order, None, sample_metadata
+
         else:
-            for cat in base_categories:
-                if split_by_interactive:
-                    for inter in ["interactive", "non-interactive"]:
-                        trial_df = region_df.query("category == @cat and is_interactive == @inter")
-                        grouped = trial_df.groupby(["session_name", "run_number", "fixation_start_idx"])
-                        for _, group in grouped:
-                            vec = []
-                            for unit in unit_order:
-                                sub = group[group["unit_uuid"] == unit]
-                                if sub.empty:
-                                    vec.append(0.0)
-                                else:
-                                    vec.append(np.mean(sub.iloc[0]["firing_rate"]))
-                            rows.append(vec)
-                            meta.append({"category": cat, "is_interactive": inter})
+            interactive_conditions = ["interactive", "non-interactive"] if split_by_interactive else [None]
+            all_keys = [(cat, inter) for cat in base_categories for inter in interactive_conditions]
+            min_fixations = float("inf")
+
+            for cat, inter in all_keys:
+                if inter is None:
+                    subset = region_df.query("category == @cat")
                 else:
-                    trial_df = region_df.query("category == @cat")
-                    grouped = trial_df.groupby(["session_name", "run_number", "fixation_start_idx"])
-                    for _, group in grouped:
-                        vec = []
-                        for unit in unit_order:
-                            sub = group[group["unit_uuid"] == unit]
-                            if sub.empty:
-                                vec.append(0.0)
-                            else:
-                                vec.append(np.mean(sub.iloc[0]["firing_rate"]))
-                        rows.append(vec)
-                        meta.append({"category": cat})
+                    subset = region_df.query("category == @cat and is_interactive == @inter")
+                
+                grouped = subset.groupby("unit_uuid").size()
+                if not grouped.empty:
+                    min_fixations = min(min_fixations, grouped.min())
 
-        pop_mat = np.array(rows)
-        sample_labels = pd.DataFrame(meta)
-        return pop_mat, sample_labels, unit_order
+            if min_fixations == 0:
+                raise ValueError("One or more (category, interaction, session) groups have zero fixations")
 
-    def _load_or_get_fit_model(self, fit_name: str, region: str) -> PCA:
+            category_order = [
+                f"{cat}_{inter}" if inter is not None else cat
+                for cat, inter in all_keys
+            ]
+            pop_list = []
+
+            for unit_uuid in unit_uuids:
+                unit_frs = []
+                for cat, inter in all_keys:
+                    if inter is None:
+                        subset = region_df.query("category == @cat")
+                    else:
+                        subset = region_df.query("category == @cat and is_interactive == @inter")
+                    if len(subset) < min_fixations:
+                        raise ValueError(f"Not enough trials for {unit_uuid} in category {cat} (interactivity: {inter})")
+                        
+                    sampled = subset.sample(n=min_fixations, random_state=42)
+                    for trial_index, (_, row) in enumerate(sampled.iterrows()):
+                        fr = np.array(row["firing_rate"])
+                        for t in range(len(fr)):
+                            sample_metadata.append({
+                                "unit_uuid": unit_uuid,
+                                "category": cat,
+                                "interactivity": inter,
+                                "trial_index": trial_index,
+                                "timepoint_index": t
+                            })
+                        unit_frs.append(fr)
+                pop_list.append(np.concatenate(unit_frs))
+
+            pop_mat = np.stack(pop_list, axis=0).T
+            return pop_mat, unit_uuids, category_order, min_fixations, sample_metadata
+
+
+    def _reshape_projection_as_timeseries_dataframe(
+        projected: np.ndarray,
+        sample_metadata: List[Dict],
+        region: str,
+        n_components: int
+    ) -> pd.DataFrame:
+        """
+        Reshapes PCA projections into one row per PC dimension and condition, with timeseries as a vector.
+
+        Returns:
+            pd.DataFrame with columns:
+            ["region", "PC dimension", "category", "is_interactive", "trial_index", "pc_timeseries"]
+        """
+        assert projected.shape[0] == len(sample_metadata)
+
+        # Organize projected rows by grouping keys
+        grouped = {}
+        for i, meta in enumerate(sample_metadata):
+            key = (
+                meta["category"],
+                meta.get("interactivity", None),
+                meta.get("trial_index", None),
+            )
+            if key not in grouped:
+                grouped[key] = []
+            grouped[key].append((meta["timepoint_index"], projected[i]))
+
+        # Flatten to one row per PC dimension
+        rows = []
+        for (cat, inter, trial), values in grouped.items():
+            # Sort by timepoint_index
+            values = sorted(values, key=lambda x: x[0])
+            matrix = np.stack([v[1] for v in values], axis=0)  # shape: (timepoints, n_components)
+            for dim in range(n_components):
+                rows.append({
+                    "region": region,
+                    "PC dimension": dim,
+                    "category": cat,
+                    "is_interactive": inter,
+                    "trial_index": trial,
+                    "pc_timeseries": matrix[:, dim].tolist()
+                })
+        return pd.DataFrame(rows)
+
+
+    def get_fit(self, fit_name, region):
+        pca = self._load_or_get_fit_model(fit_name, region)
+        orders = self._load_or_get_fit_orders(fit_name, region)
+        return pca, orders
+
+    def get_projection(self, fit_name, transform_name, region):
+        key = f"{fit_name}__{transform_name}"
+        if key not in self.pc_projection_dfs:
+            self.pc_projection_dfs[key] = {}
+        if region not in self.pc_projection_dfs[key]:
+            self.pc_projection_dfs[key][region] = self.load_projection(fit_name, transform_name, region)
+        if key not in self.pc_projection_meta:
+            self.pc_projection_meta[key] = self.load_projection_meta(fit_name, transform_name)
+        return self.pc_projection_dfs[key][region], self.pc_projection_meta[key]
+
+    def _load_or_get_fit_model(self, fit_name, region):
         if fit_name not in self.pc_fit_models:
             self.pc_fit_models[fit_name] = {}
         if region not in self.pc_fit_models[fit_name]:
@@ -205,15 +285,19 @@ class PCProjector:
             self.pc_fit_models[fit_name][region] = load_pickle(path)
         return self.pc_fit_models[fit_name][region]
 
-    def _load_or_get_fit_orders(self, fit_name: str, region: str) -> Dict:
-        path = get_pc_fit_orders_path(self.config.pc_projection_base_dir, fit_name, region)
-        return load_pickle(path)
+    def _load_or_get_fit_orders(self, fit_name, region):
+        if fit_name not in self.unit_and_category_orders:
+            self.unit_and_category_orders[fit_name] = {}
+        if region not in self.unit_and_category_orders[fit_name]:
+            path = get_pc_fit_orders_path(self.config.pc_projection_base_dir, fit_name, region)
+            self.unit_and_category_orders[fit_name][region] = load_pickle(path)
+        return self.unit_and_category_orders[fit_name][region]
 
-    def load_projection(self, fit_name: str, transform_name: str, region: str):
+    def load_projection(self, fit_name, transform_name, region):
         path = get_pc_projection_path(self.config.pc_projection_base_dir, fit_name, transform_name, region)
         return load_df_from_pkl(path)
 
-    def load_projection_meta(self, fit_name: str, transform_name: str):
+    def load_projection_meta(self, fit_name, transform_name):
         path = get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_name, transform_name)
         with open(path, "r") as f:
             return json.load(f)
