@@ -5,10 +5,13 @@ import pdb
 import logging
 import os
 import json
-from typing import Optional, List, Dict, Tuple, Union
+from typing import List, Dict
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
+
+from os import listdir
+from os.path import join, isdir
 
 from socialgaze.utils.saving_utils import save_df_to_pkl, save_pickle
 from socialgaze.utils.loading_utils import load_df_from_pkl, load_pickle
@@ -114,6 +117,54 @@ class PCProjector:
                 get_pc_projection_meta_path(self.config.pc_projection_base_dir, fit_spec_name, transform_spec.name)
             )
 
+    def get_fit(self, fit_name, region):
+        pca = self._load_or_get_fit_model(fit_name, region)
+        orders = self._load_or_get_fit_orders(fit_name, region)
+        return pca, orders
+
+    def get_projection(self, fit_name, transform_name, region):
+        key = f"{fit_name}__{transform_name}"
+        if key not in self.pc_projection_dfs:
+            self.pc_projection_dfs[key] = {}
+        if region not in self.pc_projection_dfs[key]:
+            self.pc_projection_dfs[key][region] = self.load_projection(fit_name, transform_name, region)
+        if key not in self.pc_projection_meta:
+            self.pc_projection_meta[key] = self.load_projection_meta(fit_name, transform_name)
+        return self.pc_projection_dfs[key][region], self.pc_projection_meta[key]
+
+
+    def get_available_fit_transform_region_keys(self) -> Dict[str, List[str]]:
+        """
+        Scans the saved projection directories and returns a dictionary mapping
+        (fit_name, transform_name) to a list of regions with available projections.
+
+        Returns:
+            Dict[str, List[str]]: key = f"{fit_name}__{transform_name}", value = list of regions
+        """
+        root = self.config.pc_projection_base_dir
+        keys_to_regions = {}
+
+        for key in listdir(root):
+            full_path = join(root, key)
+            if not isdir(full_path) or "__" not in key:
+                continue
+            try:
+                fit_name, transform_name = key.split("__")
+            except ValueError:
+                continue  # Skip malformed folders
+
+            regions = []
+            for fname in listdir(full_path):
+                if fname.startswith("projection_") and fname.endswith(".pkl"):
+                    region = fname.replace("projection_", "").replace(".pkl", "")
+                    regions.append(region)
+
+            if regions:
+                keys_to_regions[key] = regions
+
+        return keys_to_regions
+
+
 
     def _get_filtered_psth_df(self, trialwise, categories, split_by_interactive, agent=None):
         if trialwise:
@@ -206,7 +257,8 @@ class PCProjector:
             category_order = [
                 f"{cat}_{inter}" if inter is not None else cat
                 for cat, inter in all_keys
-            
+            ]
+
             pop_list = []
 
             for unit_uuid in unit_uuids:
@@ -321,22 +373,6 @@ class PCProjector:
 
         return pd.DataFrame(rows)
 
-
-
-    def get_fit(self, fit_name, region):
-        pca = self._load_or_get_fit_model(fit_name, region)
-        orders = self._load_or_get_fit_orders(fit_name, region)
-        return pca, orders
-
-    def get_projection(self, fit_name, transform_name, region):
-        key = f"{fit_name}__{transform_name}"
-        if key not in self.pc_projection_dfs:
-            self.pc_projection_dfs[key] = {}
-        if region not in self.pc_projection_dfs[key]:
-            self.pc_projection_dfs[key][region] = self.load_projection(fit_name, transform_name, region)
-        if key not in self.pc_projection_meta:
-            self.pc_projection_meta[key] = self.load_projection_meta(fit_name, transform_name)
-        return self.pc_projection_dfs[key][region], self.pc_projection_meta[key]
 
     def _load_or_get_fit_model(self, fit_name, region):
         if fit_name not in self.pc_fit_models:

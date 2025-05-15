@@ -9,15 +9,17 @@ Description:
     PCA specs and uses the ThreeDPlotter class to generate plots for each brain region.
 
 Run:
-    python scripts/visualization/pc_projection_plot.py
+    python scripts/visualization/plot_pc_trajectories.py
 """
 
 import logging
+import pdb
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.config.psth_config import PSTHConfig
 from socialgaze.config.interactivity_config import InteractivityConfig
+from socialgaze.config.pca_config import PCAConfig
 from socialgaze.config.plotting_config import PlottingConfig
 
 from socialgaze.data.gaze_data import GazeData
@@ -26,7 +28,7 @@ from socialgaze.features.fixation_detector import FixationDetector
 from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.features.psth_extractor import PSTHExtractor
 from socialgaze.features.pc_projector import PCProjector
-from socialgaze.visualization.3d_plotter import ThreeDPlotter
+from socialgaze.visualization.plot_3d import ThreeDPlotter
 
 from socialgaze.specs.pca_specs import FIT_SPECS, TRANSFORM_SPECS
 
@@ -41,6 +43,7 @@ def main():
     fixation_config = FixationConfig()
     psth_config = PSTHConfig()
     interactivity_config = InteractivityConfig()
+    pca_config = PCAConfig()
     plotting_config = PlottingConfig()
 
     logger.info("Initializing data managers...")
@@ -61,19 +64,27 @@ def main():
     )
 
     logger.info("Creating PC projector and 3D plotter...")
-    projector = PCProjector(config=plotting_config, psth_extractor=psth_extractor)
+    projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
     plotter = ThreeDPlotter(config=plotting_config)
 
-    for fit_spec in FIT_SPECS:
-        for transform_spec in TRANSFORM_SPECS:
-            key = f"{fit_spec.name}__{transform_spec.name}"
-            for region in projector.pc_projection_dfs.get(key, {}).keys():
-                try:
-                    logger.info(f"Plotting: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")
-                    df, _ = projector.get_projection(fit_spec.name, transform_spec.name, region)
-                    plotter.plot_pc_trajectories_all_trials(df, fit_spec.name, transform_spec.name, region)
-                except Exception as e:
-                    logger.warning(f"Plotting failed for {key} in {region}: {e}")
+    available_keys = projector.get_available_fit_transform_region_keys()
+
+    for (fit_spec, transform_spec) in [(f, t) for f in FIT_SPECS for t in TRANSFORM_SPECS]:
+        key = f"{fit_spec.name}__{transform_spec.name}"
+        if key not in available_keys:
+            continue
+        for region in available_keys[key]:
+            try:
+                logger.info(f"Plotting: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")                
+                df, _ = projector.get_projection(fit_spec.name, transform_spec.name, region)
+                save_path_static = plotter.plot_pc_trajectories_all_trials(df, fit_spec.name, transform_spec.name, region)
+                logger.info(f"Saved static 3D plot to: {save_path_static}")
+
+                save_path_rot = plotter.animate_pc_trajectories_3d(df, fit_spec.name, transform_spec.name, region)
+                logger.info(f"Saved rotating 3D plot to: {save_path_rot}")
+
+            except Exception as e:
+                logger.warning(f"Plotting failed for {key} in {region}: {e}")
 
     logger.info("PC projection plotting completed.")
 

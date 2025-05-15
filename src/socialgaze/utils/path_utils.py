@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from typing import Dict, Union
-
+from datetime import date
 
 # --------------------
 # == Root paths ==
@@ -389,6 +389,8 @@ def get_sbatch_script_path(job_out_dir: Path, job_name: str) -> Path:
 # == PC fit and projection paths ==
 # ---------------------------------
 
+def get_pc_model_basedir(config):
+    return Path(config.processed_data_dir) / "pc_projection"
 
 def get_pc_fit_model_path(base_dir: str, fit_name: str, region: str) -> Path:
     """
@@ -451,8 +453,28 @@ def get_pc_projection_meta_path(base_dir: str, fit_name: str, transform_name: st
     return Path(base_dir) / f"{fit_name}__{transform_name}" / "meta.pkl"
 
 
-def get_pc_plot_path(base_dir, fit_name, transform_name, region):
-    return os.path.join(base_dir, f"{fit_name}__{transform_name}", region)
+def add_date_dir_to_path(base_path: str) -> str:
+    """
+    Appends today's date (YYYY-MM-DD) as a subdirectory to the given path.
+
+    Args:
+        base_path (str): The base directory path.
+
+    Returns:
+        str: The updated path with today's date appended.
+    """
+    today = date.today().isoformat()
+    return os.path.join(base_path, today)
+
+
+def get_pc_plot_path(base_dir, fit_name, transform_name, dated=True):
+    if dated:
+        base_dir = add_date_dir_to_path(base_dir)
+    path = os.path.join(base_dir, fit_name, transform_name)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
 
 # ------------------------
 # == General path tools ==
