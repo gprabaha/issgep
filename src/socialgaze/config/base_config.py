@@ -1,207 +1,100 @@
-# src/socialgaze/config/base_config.py
+# scripts/neural_analysis/02_pc_projection.py
 
-import os
-from pathlib import Path
+"""
+Script: 02_pc_projection.py
+
+Description:
+    This script initializes all necessary data/config objects and runs PCA on 
+    population-averaged firing rates grouped by fixation category or interactivity.
+    The resulting PCA fits and projections are saved to disk for downstream analyses.
+
+Run:
+    python scripts/neural_analysis/02_pc_projection.py
+"""
+
 import logging
-import socket
-import getpass
-from typing import Dict, Optional, List
-import pandas as pd
+from itertools import product
+from joblib import delayed
 
-from socialgaze.utils.loading_utils import load_df_from_pkl, load_config_from_json
-from socialgaze.utils.path_utils import (
-    determine_root_data_dir,
-    get_project_root,
-    get_default_config_folder,
-    get_ephys_days_df_pkl_path,
-    get_position_df_pkl_path,
-    get_pupil_df_pkl_path,
-    get_roi_df_pkl_path,
-    get_time_df_pkl_path,
-    get_run_lengths_df_pkl_path,
-    get_spike_times_mat_path,
-    get_spike_df_pkl_path,
-    get_default_data_paths,
-    get_raw_data_directories,
-    get_pupil_file_path,
-    get_roi_file_path,
-    get_time_file_path,
-    join_folder_and_filename
-)
-from socialgaze.utils.discovery_utils import (
-    get_config_filename,
-    get_mat_filename_pattern,
-    find_valid_sessions,
-    filter_sessions_with_ephys
-)
-from socialgaze.utils.saving_utils import save_config_to_json
-from socialgaze.utils.conversion_utils import object_to_dict, assign_dict_attributes_to_object
-from socialgaze.utils.discovery_utils import get_num_available_cpus
+from socialgaze.config.base_config import BaseConfig
+from socialgaze.config.fixation_config import FixationConfig
+from socialgaze.config.psth_config import PSTHConfig
+from socialgaze.config.interactivity_config import InteractivityConfig
+from socialgaze.config.pca_config import PCAConfig
 
-import pdb
+from socialgaze.data.gaze_data import GazeData
+from socialgaze.data.spike_data import SpikeData
+from socialgaze.features.fixation_detector import FixationDetector
+from socialgaze.features.interactivity_detector import InteractivityDetector
+from socialgaze.features.psth_extractor import PSTHExtractor
+from socialgaze.features.pc_projector import PCProjector
 
+from socialgaze.specs.pca_specs import FIT_SPECS, TRANSFORM_SPECS
+from socialgaze.utils.parallel_utils import run_joblib_parallel
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class BaseConfig:
-    """
-    A configuration manager for handling paths, environment flags,
-    and available session/run combinations.
+def main():
+    logger.info("Initializing config objects...")
+    base_config = BaseConfig()
+    fixation_config = FixationConfig()
+    neural_config = PSTHConfig()
+    interactivity_config = InteractivityConfig()
+    pca_config = PCAConfig()
 
-    Responsibilities:
-    - Detect runtime environment (cluster/local)
-    - Set default paths (raw, processed, outputs, config)
-    - Determine valid sessions and runs
-    - Save/load config from a JSON file
-    """
+    logger.info("Initializing data managers...")
+    gaze_data = GazeData(config=base_config)
+    spike_data = SpikeData(config=base_config)
 
-    def __init__(self, config_path: Optional[str] = None):
-        """
-        Initializes the BaseConfig object.
+    logger.info("Initializing detectors...")
+    fixation_detector = FixationDetector(gaze_data=gaze_data, config=fixation_config)
+    interactivity_detector = InteractivityDetector(config=interactivity_config)
 
-        If a saved config exists at the provided path, it loads it.
-        Otherwise, it auto-detects the environment, sets up paths, and scans for valid sessions/runs.
-        On non-cluster environments, raw data paths and scanning are skipped.
+    logger.info("Creating PSTH extractor...")
+    psth_extractor = PSTHExtractor(
+        config=neural_config,
+        gaze_data=gaze_data,
+        spike_data=spike_data,
+        fixation_detector=fixation_detector,
+        interactivity_detector=interactivity_detector,
+    )
 
-        Args:
-            config_path (Optional[str]): Optional path to an existing saved config file.
-        """
-        self.detect_runtime_environment()
-        self.project_root = get_project_root()
-        self.config_folder = get_default_config_folder(self.project_root)
-        self.filename = get_config_filename(self.is_cluster, self.is_grace)
-        
-        # Determine config save path
-        self.config_path = Path(config_path) if config_path else join_folder_and_filename(self.config_folder, self.filename)
+    try:
+        logger.info("Creating PC projector...")
+        pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
 
-        # Core processed output paths (these are safe to set in any environment)
-        paths = get_default_data_paths(self.project_root)
-        self.processed_data_dir = paths["processed"]
-        self.output_dir = paths["outputs"]
-        self.plots_dir = paths["plots"]
-
-        # Set all processed dataframe paths via path_utils
-        self.ephys_days_and_monkeys_df_path = get_ephys_days_df_pkl_path(self)
-        self.positions_df_path = get_position_df_pkl_path(self)
-        self.pupil_df_path = get_pupil_df_pkl_path(self)
-        self.roi_vertices_df_path = get_roi_df_pkl_path(self)
-        self.neural_timeline_df_path = get_time_df_pkl_path(self)
-        self.run_length_df_path = get_run_lengths_df_pkl_path(self)
-        self.spiketimes_df_path = get_spike_df_pkl_path(self)
-
-        # Get days/sessions with ephys data and the corresponding monkeys
-        self.ephys_days_and_monkeys_df = load_df_from_pkl(self.ephys_days_and_monkeys_df_path)
-
-        self.num_cpus = get_num_available_cpus(self.is_cluster)
-
-        self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
-        self.session_names: List[str] = []
-        self.runs_by_session: Dict[str, List[str]] = {}
-
-        if self.is_cluster:
-            # Only define and validate raw data paths if on a cluster
-            self.data_dir = determine_root_data_dir(
-                is_cluster=self.is_cluster,
-                is_grace=self.is_grace,
-                prabaha_local=self.prabaha_local
+        if pca_config.use_parallel:
+            logger.info("Running PCA fits in parallel...")
+            run_joblib_parallel(
+                jobs=[delayed(pc_projector.fit)(fit_spec) for fit_spec in FIT_SPECS],
+                n_jobs=pca_config.num_cpus,
             )
-            raw_dirs = get_raw_data_directories(self.data_dir)
-            self.position_dir = raw_dirs["position"]
-            self.time_dir = raw_dirs["time"]
-            self.pupil_dir = raw_dirs["pupil"]
-            self.roi_dir = raw_dirs["roi"]
 
-            self.file_pattern = get_mat_filename_pattern()
-            self.initialize_sessions_and_runs()
-
-            self.spiketimes_mat_path = get_spike_times_mat_path(self)
-            self.extract_sessions_with_ephys_data(self.ephys_days_and_monkeys_df)
-
-
-
-    # -----------------------------
-    # Config environment
-    # -----------------------------
-
-    def detect_runtime_environment(self) -> None:
-        """
-        Auto-detects the machine/runtime environment and sets flags:
-        - is_cluster: whether running on HPC
-        - is_grace: whether running on Grace cluster
-        - prabaha_local: whether running locally on Prabaha's machine
-        """
-        hostname = socket.gethostname().lower()
-        username = getpass.getuser()
-
-        if "grace" in hostname or os.path.exists("/gpfs/gibbs/"):
-            self.is_cluster = True
-            self.is_grace = True
-            self.prabaha_local = False
-        elif "milgram" in hostname or os.path.exists("/gpfs/milgram/"):
-            self.is_cluster = True
-            self.is_grace = False
-            self.prabaha_local = False
-        elif username == "prabaha":
-            self.is_cluster = False
-            self.is_grace = False
-            self.prabaha_local = True
+            logger.info("Running PCA projections in parallel...")
+            run_joblib_parallel(
+                jobs=[
+                    delayed(pc_projector.project)(fit_spec.name, transform_spec)
+                    for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS)
+                ],
+                n_jobs=pca_config.num_cpus,
+            )
         else:
-            self.is_cluster = False
-            self.is_grace = False
-            self.prabaha_local = False
+            for fit_spec in FIT_SPECS:
+                logger.info(f"Running PCA fit: {fit_spec.name}")
+                pc_projector.fit(fit_spec)
 
-    # -----------------------------
-    # Session / run discovery
-    # -----------------------------
+            for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
+                logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
+                pc_projector.project(fit_spec.name, transform_spec)
 
-    def initialize_sessions_and_runs(self) -> None:
-        """
-        Populates `self.session_names` and `self.runs_by_session`
-        using a validity check on required .mat files.
-        """
-        self.session_names, self.runs_by_session = find_valid_sessions(
-            self,
-            path_fns={
-                'time': get_time_file_path,
-                'pupil': get_pupil_file_path,
-                'roi': get_roi_file_path,
-            }
-        )
+        logger.info("PCA projection script completed successfully.")
 
-    def extract_sessions_with_ephys_data(self, ephys_days_and_monkeys_df: pd.DataFrame) -> None:
-        """
-        Filters session/run list to only include those with matching ephys data.
-
-        Args:
-            ephys_days_and_monkeys_df (pd.DataFrame): Contains ephys recording metadata.
-        """
-        self.session_names, self.runs_by_session = filter_sessions_with_ephys(
-            self.session_names,
-            self.runs_by_session,
-            ephys_days_and_monkeys_df
-        )
-
-    # -----------------------------
-    # Save / load
-    # -----------------------------
-
-    def save_to_file(self, config_path: str) -> None:
-        """
-        Serializes the config as a dictionary and saves to a JSON file.
-
-        Args:
-            config_path (str): Path where the config should be saved.
-        """
-        save_config_to_json(object_to_dict(self), config_path)
-
-    def load_from_file(self, config_path: str) -> None:
-        """
-        Loads config values from a JSON file and sets them as instance attributes.
-
-        Args:
-            config_path (str): Path to the saved config file.
-        """
-        config_data = load_config_from_json(config_path)
-        assign_dict_attributes_to_object(self, config_data)
+    except Exception as e:
+        logger.exception(f"PCA projection failed: {e}")
 
 
+if __name__ == "__main__":
+    main()

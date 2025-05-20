@@ -22,6 +22,30 @@ class PCATransformSpec:
 
 FIT_SPECS = [
     PCAFitSpec(
+        name="fit_avg_face",
+        trialwise=False,
+        categories=["face"],
+        split_by_interactive=None,
+    ),
+    PCAFitSpec(
+        name="fit_trialwise_face",
+        trialwise=True,
+        categories=["face"],
+        split_by_interactive=None,
+    ),
+    PCAFitSpec(
+        name="fit_avg_obj",
+        trialwise=False,
+        categories=["object"],
+        split_by_interactive=None,
+    ),
+    PCAFitSpec(
+        name="fit_trialwise_obj",
+        trialwise=True,
+        categories=["object"],
+        split_by_interactive=None,
+    ),
+    PCAFitSpec(
         name="fit_avg_face_obj",
         trialwise=False,
         categories=["face", "object"],
@@ -48,6 +72,30 @@ FIT_SPECS = [
 ]
 
 TRANSFORM_SPECS = [
+    PCATransformSpec(
+        name="transform_avg_face",
+        trialwise=False,
+        categories=["face"],
+        split_by_interactive=None,
+    ),
+    PCATransformSpec(
+        name="transform_trialwise_face",
+        trialwise=True,
+        categories=["face"],
+        split_by_interactive=None,
+    ),
+    PCATransformSpec(
+        name="transform_avg_obj",
+        trialwise=False,
+        categories=["object"],
+        split_by_interactive=None,
+    ),
+    PCATransformSpec(
+        name="transform_trialwise_obj",
+        trialwise=True,
+        categories=["object"],
+        split_by_interactive=None,
+    ),
     PCATransformSpec(
         name="transform_avg_face_obj",
         trialwise=False,

@@ -13,6 +13,8 @@ Run:
 """
 
 import logging
+from itertools import product
+from joblib import delayed
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
@@ -28,6 +30,8 @@ from socialgaze.features.psth_extractor import PSTHExtractor
 from socialgaze.features.pc_projector import PCProjector
 
 from socialgaze.specs.pca_specs import FIT_SPECS, TRANSFORM_SPECS
+from socialgaze.utils.parallel_utils import run_joblib_parallel
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -63,12 +67,26 @@ def main():
         logger.info("Creating PC projector...")
         pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
 
-        for fit_spec in FIT_SPECS:
-            logger.info(f"Running PCA fit: {fit_spec.name}")
-            pc_projector.fit(fit_spec)
+        if pca_config.use_parallel:
+            logger.info("Running PCA fits in parallel...")
+            run_joblib_parallel(
+                delayed(pc_projector.fit)(fit_spec)
+                for fit_spec in FIT_SPECS
+            )
 
-        for fit_spec in FIT_SPECS:
-            for transform_spec in TRANSFORM_SPECS:
+            logger.info("Running PCA projections in parallel...")
+            run_joblib_parallel(
+                delayed(pc_projector.project)(fit_spec.name, transform_spec)
+                for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS)
+            )
+
+
+        else:
+            for fit_spec in FIT_SPECS:
+                logger.info(f"Running PCA fit: {fit_spec.name}")
+                pc_projector.fit(fit_spec)
+
+            for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
                 logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
                 pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
 

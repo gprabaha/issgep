@@ -25,10 +25,6 @@ class ThreeDPlotter:
         Trials in the same (cat, inter) group share color and legend label.
         """
 
-        # Group by (cat, inter, trial_index)
-        has_inter = "is_interactive" in proj_df.columns and proj_df["is_interactive"].notna().any()
-        has_trial = "trial_index" in proj_df.columns and proj_df["trial_index"].notna().any()
-
         grouped = defaultdict(list)
         for _, row in proj_df.iterrows():
             key = (
@@ -99,7 +95,6 @@ class ThreeDPlotter:
         """
 
         # === Group trials
-        has_inter = "is_interactive" in proj_df.columns and proj_df["is_interactive"].notna().any()
         grouped = defaultdict(list)
         for _, row in proj_df.iterrows():
             key = (row["category"], row.get("is_interactive", None), row.get("trial_index", None))

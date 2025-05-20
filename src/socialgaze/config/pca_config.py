@@ -9,6 +9,7 @@ class PCAConfig(BaseConfig):
         super().__init__(config_path)
 
         # === PCA control flags ===
+        self.use_parallel = False
         self.fit_categories = True
         self.fit_by_trial = False
         self.project_categories = True
