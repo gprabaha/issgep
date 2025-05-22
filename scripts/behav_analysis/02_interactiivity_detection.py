@@ -11,7 +11,6 @@ periods based on a density threshold, and saves both outputs.
 
 import logging
 from socialgaze.config.interactivity_config import InteractivityConfig
-from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.features.interactivity_detector import InteractivityDetector
 
 # Configure logging
@@ -36,15 +35,15 @@ def main():
     # Initialize interactivity detector
     detector = InteractivityDetector(config=config)
 
-    # Run mutual fixation density detection and save results
-    logger.info("Computing mutual fixation density...")
-    detector.detect_mutual_face_fix_density()
-    detector.save_fix_densities()
-    logger.info("Mutual fixation density computed and saved.")
+    # # Run mutual fixation density detection and save results
+    # logger.info("Computing mutual fixation density...")
+    # detector.detect_mutual_face_fix_density()
+    # detector.save_fix_densities()
+    # logger.info("Mutual fixation density computed and saved.")
 
-    # Preview mutual fixation density
-    print("\n=== Head of Mutual Fixation Density DataFrame ===")
-    print(detector.get_density().head())
+    # # Preview mutual fixation density
+    # print("\n=== Head of Mutual Fixation Density DataFrame ===")
+    # print(detector.get_density().head())
 
     # Compute and save interactivity periods
     logger.info("Extracting interactivity periods...")

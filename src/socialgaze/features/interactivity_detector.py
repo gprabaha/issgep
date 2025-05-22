@@ -167,7 +167,7 @@ class InteractivityDetector:
 
     def save_interactivity_periods(self, path: str = None):
         """Saves the interactivity_df to disk as a pickle file."""
-        if self.interactivity_df is None:
+        if self.interactivity_periods is None:
             raise ValueError("No interactivity data to save.")
         path = path or self.config.interactivity_df_path
         save_df_to_pkl(self.interactivity_periods, path)
