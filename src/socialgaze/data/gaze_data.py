@@ -151,45 +151,44 @@ class GazeData:
             if loaded_data:
                 setattr(self, data_type, pd.concat(loaded_data, ignore_index=True))
 
+
     # Load and save generated dataframes
     
     def load_dataframes(self, data_types: Optional[List[str]] = None):
         """
-        Loads previously saved DataFrames from .pkl files into self.raw_data.
+        Loads previously saved DataFrames from .pkl files into self.
 
         Args:
-            data_types (List[str], optional): Data types to load. If None, all are loaded.
+            data_types (List[str], optional): Data types to load. If None, all available are loaded.
         """
         df_path_map = {
             'positions': self.config.positions_df_path,
             'pupil': self.config.pupil_df_path,
             'roi_vertices': self.config.roi_vertices_df_path,
-            'neural_timeline': self.config.neural_timeline_df_path
+            'neural_timeline': self.config.neural_timeline_df_path,
+            'run_lengths': self.config.run_length_df_path
         }
-        data_types = data_types if data_types else self.behav_data_loader_dict.keys()
+
+        # Determine what to load
+        data_types = data_types if data_types else list(df_path_map.keys())
+
         for data_type in data_types:
             pkl_path = df_path_map.get(data_type)
-            if pkl_path.exists():
+            if pkl_path and pkl_path.exists():
                 try:
                     df = load_df_from_pkl(pkl_path)
                     setattr(self, data_type, df)
                     logger.info(f"Loaded {data_type} from {pkl_path}")
                 except Exception as e:
                     logger.warning(f"Failed to load {data_type} from disk: {e}")
-        # Also try loading run_lengths if present
-        run_lengths_path = self.config.run_length_df_path
-        if run_lengths_path.exists():
-            try:
-                self.run_lengths = load_df_from_pkl(run_lengths_path)
-                logger.info("Loaded run_lengths from disk.")
-            except Exception as e:
-                logger.warning(f"Failed to load run_lengths.pkl: {e}")
+            else:
+                logger.warning(f"No path found or file missing for {data_type}")
 
 
 
     def save_as_dataframes(self, output_dir: Optional[Path] = None):
         """
-        Saves all in-memory DataFrames in self.raw_data and run_lengths to the specified output directory as .pkl files.
+        Saves all in-memory DataFrames in self to the specified output directory as .pkl files.
 
         Args:
             output_dir (Optional[Path]): Directory to save the pickle files in. Defaults to self.config.processed_data_dir.
@@ -198,21 +197,24 @@ class GazeData:
         os.makedirs(output_dir, exist_ok=True)
 
         logger.info("Saving raw data dataframes...")
+
         data_path_map = {
             'positions': (self.positions, self.config.positions_df_path),
             'pupil': (self.pupil, self.config.pupil_df_path),
             'roi_vertices': (self.roi_vertices, self.config.roi_vertices_df_path),
-            'neural_timeline': (self.neural_timeline, self.config.neural_timeline_df_path)
+            'neural_timeline': (self.neural_timeline, self.config.neural_timeline_df_path),
+            'run_lengths': (self.run_lengths, self.config.run_length_df_path)
         }
+
         for data_type, (df, path) in data_path_map.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
-                save_df_to_pkl(df, path)
+                try:
+                    save_df_to_pkl(df, path)
+                    logger.info(f"Saved {data_type} to {path}")
+                except Exception as e:
+                    logger.warning(f"Failed to save {data_type}: {e}")
 
-        if self.run_lengths is not None and isinstance(self.run_lengths, pd.DataFrame):
-            run_lengths_path = self.config.run_length_df_path
-            save_df_to_pkl(self.run_lengths, run_lengths_path)
-            logger.info("Saved run_lengths to disk.")
-        logger.info("All raw data (and run lengths) saved as DataFrames.")
+        logger.info("All raw data (including run_lengths) saved as DataFrames.")
 
 
     # Fetch any part of the data
