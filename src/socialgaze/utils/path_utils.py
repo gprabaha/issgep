@@ -385,6 +385,13 @@ def get_sbatch_script_path(job_out_dir: Path, job_name: str) -> Path:
     return scripts_dir / f"dsq-joblist_{job_name}.sh"
 
 
+# --------------------------
+# == Fixation probability ==
+# --------------------------
+
+def get_fixation_probability_path(config):
+    return Path(config.processed_data_dir) / "fix_prob_df.pkl"
+
 # ---------------------------------
 # == PC fit and projection paths ==
 # ---------------------------------
