@@ -138,7 +138,7 @@ class FixationDetector:
         if behavior_type not in ["fixations", "saccades"]:
             raise ValueError("Behavior type must be either 'fixations' or 'saccades'")
         df = getattr(self, behavior_type)
-        if df.empty:
+        if df == None:
             logger.info(f"{behavior_type} not loaded, attempting to load from disk.")
             self.load_dataframes(behavior_type)
             df = getattr(self, behavior_type)

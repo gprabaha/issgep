@@ -1,11 +1,13 @@
 # src/socialgaze/features/fix_prob_detector.py
 
+import pdb
 import logging
 from typing import Optional, List, Tuple
 from tqdm import tqdm
 import pandas as pd
 
-from socialgaze.utils.saving_utils import save_df_to_pkl, load_df_from_pkl
+from socialgaze.utils.saving_utils import save_df_to_pkl 
+from socialgaze.utils.loading_utils import load_df_from_pkl
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +31,16 @@ class FixProbDetector:
             logger.info("Fixations not loaded, using get_behavior_data to populate them.")
             self.detector.fixations = self.detector.get_behavior_data("fixations")
 
-        fixation_df = self.detector.fixations
-        grouped = fixation_df.groupby(["session_name", "interaction_type", "run_number"])
+        if self.detector.gaze_data.run_lengths is None:
+            logger.info("Run lengths not loaded, using get_data('run_lengths') to populate them.")
+            self.detector.gaze_data.run_lengths = self.detector.gaze_data.get_data("run_lengths")
 
-        for (session, interaction, run), sub_df in tqdm(grouped, desc="Processing sessions"):
+        fixation_df = self.detector.fixations
+        run_lengths_dict = self.detector.gaze_data.run_lengths  # Expected to be a nested dict or df indexed by session/run
+        pdb.set_trace()
+        grouped = fixation_df.groupby(["session_name", "run_number"])
+
+        for (session, run), sub_df in tqdm(grouped, desc="Processing sessions"):
             try:
                 row = self.detector.config.ephys_days_and_monkeys_df
                 session_row = row[row["session_name"] == session].iloc[0]
@@ -48,27 +56,31 @@ class FixProbDetector:
             if m1_df.empty or m2_df.empty:
                 continue
 
-            m1_fix_locs = self._categorize_fixations(m1_df["fixation_location"].values[0])
-            m2_fix_locs = self._categorize_fixations(m2_df["fixation_location"].values[0])
-            run_length = m1_df["run_length"].values[0]
+            try:
+                run_length = run_lengths_dict[(session, run)]
+            except KeyError:
+                logger.warning(f"Run length for session {session}, run {run} not found.")
+                continue
 
             for category in ["eyes", "non_eye_face", "face", "out_of_roi"]:
                 if category != "face":
-                    m1_indices = [(start, stop) for cat, (start, stop) in zip(m1_fix_locs, m1_df["fixation_start_stop"].values[0]) if cat == category]
-                    m2_indices = [(start, stop) for cat, (start, stop) in zip(m2_fix_locs, m2_df["fixation_start_stop"].values[0]) if cat == category]
+                    m1_subset = m1_df[m1_df["category"] == category]
+                    m2_subset = m2_df[m2_df["category"] == category]
                 else:
-                    m1_indices = [(start, stop) for cat, (start, stop) in zip(m1_fix_locs, m1_df["fixation_start_stop"].values[0]) if cat in {"eyes", "non_eye_face"}]
-                    m2_indices = [(start, stop) for cat, (start, stop) in zip(m2_fix_locs, m2_df["fixation_start_stop"].values[0]) if cat in {"eyes", "non_eye_face"}]
+                    m1_subset = m1_df[m1_df["category"].isin(["eyes", "non_eye_face"])]
+                    m2_subset = m2_df[m2_df["category"].isin(["eyes", "non_eye_face"])]
+
+                m1_indices = list(zip(m1_subset["start"], m1_subset["stop"]))
+                m2_indices = list(zip(m2_subset["start"], m2_subset["stop"]))
 
                 joint_duration = self._compute_joint_duration(m1_indices, m2_indices)
-                p_m1 = sum(stop + 1 - start for start, stop in m1_indices) / run_length
-                p_m2 = sum(stop + 1 - start for start, stop in m2_indices) / run_length
+                p_m1 = sum(stop - start + 1 for start, stop in m1_indices) / run_length
+                p_m2 = sum(stop - start + 1 for start, stop in m2_indices) / run_length
                 p_joint = joint_duration / run_length
 
                 joint_probs.append({
                     "monkey_pair": f"{m1}-{m2}",
                     "session_name": session,
-                    "interaction_type": interaction,
                     "run_number": run,
                     "fixation_category": category,
                     "P(m1)": p_m1,
@@ -84,20 +96,13 @@ class FixProbDetector:
         return self.fixation_prob_df
 
 
+
     def get_data(self) -> pd.DataFrame:
         load_path = self.config.fix_prob_df_path
         logger.info(f"Loading fixation probability dataframe from {load_path}")
         self.fixation_prob_df = load_df_from_pkl(load_path)
         return self.fixation_prob_df
 
-
-    def _categorize_fixations(self, fix_locations: List[List[str]]) -> List[str]:
-        return [
-            "eyes" if {"face", "eyes_nf"}.issubset(set(fixes)) else
-            "non_eye_face" if set(fixes) & {"mouth", "face"} else
-            "object" if set(fixes) & {"left_nonsocial_object", "right_nonsocial_object"} else "out_of_roi"
-            for fixes in fix_locations
-        ]
 
     def _compute_joint_duration(self, m1_ranges: List[Tuple[int, int]], m2_ranges: List[Tuple[int, int]]) -> int:
         joint = 0

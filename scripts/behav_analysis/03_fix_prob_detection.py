@@ -27,5 +27,5 @@ def main():
     print(fix_prob_df.head())
 
 
-if __name__ = "__main__":
+if __name__ == "__main__":
     main()
