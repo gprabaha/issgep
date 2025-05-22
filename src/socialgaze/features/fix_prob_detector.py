@@ -213,6 +213,18 @@ class FixProbDetector:
                     joint += (overlap_end - overlap_start + 1)
         return joint
 
+
+    def _restrict_to_periods(self, df: pd.DataFrame, periods: List[Tuple[int, int]]) -> pd.DataFrame:
+        """Return rows that overlap with any period and clip their start/stop within bounds."""
+        result = []
+        for start, stop in periods:
+            sub = df[(df["stop"] >= start) & (df["start"] <= stop)].copy()
+            sub["start"] = sub["start"].clip(lower=start)
+            sub["stop"] = sub["stop"].clip(upper=stop)
+            result.append(sub)
+        return pd.concat(result) if result else pd.DataFrame(columns=df.columns)
+
+
     def _invert_periods(self, intervals: List[Tuple[int, int]], max_val: int) -> List[Tuple[int, int]]:
         if not intervals:
             return [(0, max_val - 1)]
