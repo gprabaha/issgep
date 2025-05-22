@@ -90,7 +90,6 @@ class FixProbDetector:
                     "P(m1&m2)": p_joint
                 })
 
-
         self.fixation_prob_df = pd.DataFrame(joint_probs)
         save_path = self.config.fix_prob_df_path
         save_df_to_pkl(self.fixation_prob_df, save_path)

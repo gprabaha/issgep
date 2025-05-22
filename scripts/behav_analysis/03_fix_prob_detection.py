@@ -24,7 +24,7 @@ def main():
     # fix_prob_df = fix_prob_detector.get_data()
 
     # Preview the output
-    print(fix_prob_df.head())
+    print(fix_prob_df.head(20))
 
 
 if __name__ == "__main__":
