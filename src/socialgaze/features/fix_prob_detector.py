@@ -23,6 +23,7 @@ class FixProbDetector:
         self.config = config
         self.fixation_prob_df: Optional[pd.DataFrame] = None
 
+
     def compute_and_save(self) -> pd.DataFrame:
         logger.info("Computing fixation statistics")
         joint_probs = []
@@ -36,11 +37,11 @@ class FixProbDetector:
             self.detector.gaze_data.run_lengths = self.detector.gaze_data.get_data("run_lengths")
 
         fixation_df = self.detector.fixations
-        run_lengths_dict = self.detector.gaze_data.run_lengths  # Expected to be a nested dict or df indexed by session/run
-        pdb.set_trace()
+        run_lengths_df = self.detector.gaze_data.run_lengths  # Expected to have session_name, run_number, run_length columns
+
         grouped = fixation_df.groupby(["session_name", "run_number"])
 
-        for (session, run), sub_df in tqdm(grouped, desc="Processing sessions"):
+        for (session, run), sub_df in tqdm(grouped, desc="Processing run"):
             try:
                 row = self.detector.config.ephys_days_and_monkeys_df
                 session_row = row[row["session_name"] == session].iloc[0]
@@ -57,18 +58,18 @@ class FixProbDetector:
                 continue
 
             try:
-                run_length = run_lengths_dict[(session, run)]
-            except KeyError:
-                logger.warning(f"Run length for session {session}, run {run} not found.")
+                run_length = run_lengths_df[
+                    (run_lengths_df["session_name"] == session) &
+                    (run_lengths_df["run_number"] == run)
+                ]["run_length"].values[0]
+            except IndexError:
+                logger.warning(f"Run length for session {session}, run {run} not found in DataFrame.")
                 continue
 
-            for category in ["eyes", "non_eye_face", "face", "out_of_roi"]:
-                if category != "face":
-                    m1_subset = m1_df[m1_df["category"] == category]
-                    m2_subset = m2_df[m2_df["category"] == category]
-                else:
-                    m1_subset = m1_df[m1_df["category"].isin(["eyes", "non_eye_face"])]
-                    m2_subset = m2_df[m2_df["category"].isin(["eyes", "non_eye_face"])]
+            available_categories = sub_df["category"].unique()
+            for category in sorted(available_categories):
+                m1_subset = m1_df[m1_df["category"] == category]
+                m2_subset = m2_df[m2_df["category"] == category]
 
                 m1_indices = list(zip(m1_subset["start"], m1_subset["stop"]))
                 m2_indices = list(zip(m2_subset["start"], m2_subset["stop"]))
@@ -89,12 +90,12 @@ class FixProbDetector:
                     "P(m1&m2)": p_joint
                 })
 
+
         self.fixation_prob_df = pd.DataFrame(joint_probs)
         save_path = self.config.fix_prob_df_path
         save_df_to_pkl(self.fixation_prob_df, save_path)
         logger.info(f"Saved fixation probabilities to {save_path}")
         return self.fixation_prob_df
-
 
 
     def get_data(self) -> pd.DataFrame:
