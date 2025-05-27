@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from typing import Dict, Union
+import datetime
 from datetime import date
 
 # --------------------
@@ -391,6 +392,23 @@ def get_sbatch_script_path(job_out_dir: Path, job_name: str) -> Path:
 
 def get_fixation_probability_path(config):
     return Path(config.processed_data_dir) / "fix_prob_df.pkl"
+
+
+def get_fixation_probability_by_interactivity_path(config):
+    return Path(config.processed_data_dir) / "fix_prob_by_interactivity_df.pkl"
+
+
+def get_fixation_probability_plot_dir(config) -> str:
+    """
+    Return a dated output directory for saving fixation probability plots.
+    e.g., root_dir/outputs/plots/fixation_probabilities/2025-05-27
+    """
+    path = add_date_dir_to_path(
+        Path(config.plots_dir) / "fixation_probabilities",
+    )
+    os.makedirs(path, exist_ok=True)
+    return path
+    
 
 # ---------------------------------
 # == PC fit and projection paths ==
