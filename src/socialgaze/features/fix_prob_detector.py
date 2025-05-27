@@ -204,14 +204,17 @@ class FixProbDetector:
         return self.fixation_prob_df_by_interactivity
 
     def _compute_joint_duration(self, m1_ranges: List[Tuple[int, int]], m2_ranges: List[Tuple[int, int]]) -> int:
-        joint = 0
-        for s1, e1 in m1_ranges:
-            for s2, e2 in m2_ranges:
-                overlap_start = max(s1, s2)
-                overlap_end = min(e1, e2)
-                if overlap_end >= overlap_start:
-                    joint += (overlap_end - overlap_start + 1)
-        return joint
+        """Compute the overlapping duration between m1 and m2 fixation events using set intersection."""
+        m1_timepoints = set()
+        for start, stop in m1_ranges:
+            m1_timepoints.update(range(start, stop + 1))
+
+        m2_timepoints = set()
+        for start, stop in m2_ranges:
+            m2_timepoints.update(range(start, stop + 1))
+
+        joint_timepoints = m1_timepoints & m2_timepoints
+        return len(joint_timepoints)
 
 
     def _restrict_to_periods(self, df: pd.DataFrame, periods: List[Tuple[int, int]]) -> pd.DataFrame:

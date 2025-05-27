@@ -32,12 +32,12 @@ def main():
 
     fix_prob_df = fix_prob_detector.compute_and_save()
     print("\n=== Overall Fixation Probabilities ===")
-    print(fix_prob_df.head(20))
+    print(fix_prob_df.head(10))
 
     # Compute interactivity-separated fixation probabilities
     fix_prob_df_by_interactivity = fix_prob_detector.compute_by_interactivity_and_save()
     print("\n=== Interactivity-Split Fixation Probabilities ===")
-    print(fix_prob_df_by_interactivity.head(20))
+    print(fix_prob_df_by_interactivity.head(10))
 
 
 if __name__ == "__main__":
