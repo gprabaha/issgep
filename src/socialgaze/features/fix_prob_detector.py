@@ -22,7 +22,7 @@ class FixProbDetector:
 
 
     def compute_fixation_probabilities(self, mode: str = "overall") -> pd.DataFrame:
-        allowed_modes = {"overall", "interactivity", "segments"}
+        allowed_modes =self.config.modes
         if mode not in allowed_modes:
             raise ValueError(f"Invalid mode '{mode}'. Must be one of {allowed_modes}")
 
@@ -132,7 +132,7 @@ class FixProbDetector:
 
 
     def _save_output(self, df: pd.DataFrame, mode: str):
-        allowed_modes = {"overall", "interactivity", "segments"}
+        allowed_modes =self.config.modes
         if mode not in allowed_modes:
             raise ValueError(f"Invalid mode '{mode}' in _save_output. Must be one of {allowed_modes}")
         
@@ -154,14 +154,14 @@ class FixProbDetector:
 
 
     def _load_output(self, mode: Optional[str] = None):
-        allowed_modes = {"overall", "interactivity", "segments"}
         path_map = {
             "overall": self.config.fix_prob_df_path,
             "interactivity": self.config.fix_prob_df_by_interactivity_path,
             "segments": self.config.fix_prob_df_by_interactivity_segment_path
         }
-
+        allowed_modes =self.config.modes
         if mode is None:
+            logger.info(f"No mode provided to _load_output. Loading all modes")
             for m in allowed_modes:
                 self._load_output(m)
             return
