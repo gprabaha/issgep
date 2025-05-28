@@ -11,6 +11,7 @@ def main():
 
     # Plot all modes
     for mode in fix_prob_config.modes:
+        print(f"\n=== Plotting fixation probability violins for mode = '{mode}' ===")
         plot_joint_vs_marginal_violin(config=fix_prob_config, detector=fix_prob_detector, mode=mode)
 
 

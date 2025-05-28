@@ -1,5 +1,6 @@
 # src/socialgaze/features/fix_prob_detector.py
 
+import pdb
 import logging
 from typing import Optional, List, Tuple
 import pandas as pd
@@ -69,25 +70,25 @@ class FixProbDetector:
                 continue
 
             if mode == "overall":
-                periods = [("all", [(0, run_length - 1)])]
+                periods = [("all", [], [(0, run_length - 1)])]
             elif mode == "interactivity":
                 int_df = interactivity_df.query(
                     "session_name == @session and run_number == @run"
                 )
                 int_periods = list(zip(int_df["start"], int_df["stop"]))
                 nonint_periods = self._invert_periods(int_periods, run_length)
-                periods = [("interactive", int_periods), ("non_interactive", nonint_periods)]
+                periods = [("interactive", [], int_periods), ("non_interactive", [], nonint_periods)]
             elif mode == "segments":
                 int_df = interactivity_df.query(
                     "session_name == @session and run_number == @run"
                 )
                 int_periods = list(zip(int_df["start"], int_df["stop"]))
                 nonint_periods = self._invert_periods(int_periods, run_length)
-                periods = [(f"{label}_{i}", [(s, e)])
+                periods = [(f"{label}", f"{i}", [(s, e)])
                            for label, plist in [("interactive", int_periods), ("non_interactive", nonint_periods)]
                            for i, (s, e) in enumerate(plist)]
 
-            for label, period_list in periods:
+            for label, index, period_list in periods:
                 total_duration = sum(e - s + 1 for s, e in period_list)
                 if total_duration == 0:
                     continue
@@ -102,7 +103,7 @@ class FixProbDetector:
 
                     m1_idx = list(zip(m1_cat["start"], m1_cat["stop"]))
                     m2_idx = list(zip(m2_cat["start"], m2_cat["stop"]))
-
+                    
                     joint = self._compute_joint_duration(m1_idx, m2_idx)
                     p1 = sum(e - s + 1 for s, e in m1_idx) / total_duration
                     p2 = sum(e - s + 1 for s, e in m2_idx) / total_duration
@@ -121,7 +122,7 @@ class FixProbDetector:
                     if mode != "overall":
                         row["interactivity"] = label
                     if mode == "segments":
-                        row["segment_id"] = int(label.split("_")[-1])
+                        row["segment_id"] = int(index)
                         row["start"], row["stop"] = period_list[0]
 
                     joint_probs.append(row)

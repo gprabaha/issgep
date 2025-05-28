@@ -23,29 +23,18 @@ def main():
     fixation_detector = FixationDetector(gaze_data=gaze_data, config=fixation_config)
     interactivity_detector = InteractivityDetector(config=interactivity_config)
 
-    # Compute fixation probabilities (overall)
+    # Initialize fixation probability detector
     fix_prob_detector = FixProbDetector(
         fixation_detector=fixation_detector,
         config=fix_prob_config,
         interactivity_detector=interactivity_detector
     )
 
-    mode = "overall"
-    fix_prob_df = fix_prob_detector.compute_fixation_probabilities(mode)
-    print("\n=== Overall Fixation Probabilities ===")
-    print(fix_prob_df.head(10))
-
-    # Compute interactivity-separated fixation probabilities
-    mode = "interactivity"
-    fix_prob_df_by_interactivity = fix_prob_detector.compute_fixation_probabilities(mode)
-    print("\n=== Interactivity-Split Fixation Probabilities ===")
-    print(fix_prob_df_by_interactivity.head(10))
-
-    # Compute interactivity-segment-separated fixation probabilities
-    mode = "segments"
-    fix_prob_df_by_interactivity_Segments = fix_prob_detector.compute_fixation_probabilities(mode)
-    print("\n=== Interactivity-Segment-Split Fixation Probabilities ===")
-    print(fix_prob_df_by_interactivity_Segments.head(10))
+    # Loop through all modes and compute fixation probabilities
+    for mode in fix_prob_config.modes:
+        print(f"\n=== Computing fixation probabilities: mode = '{mode}' ===")
+        df = fix_prob_detector.compute_fixation_probabilities(mode)
+        print(df.head(10))
 
 
 if __name__ == "__main__":

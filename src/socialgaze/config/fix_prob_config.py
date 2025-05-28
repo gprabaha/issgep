@@ -12,7 +12,7 @@ class FixProbConfig(FixationConfig):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.modes = {"overall", "interactivity", "segments"}
+        self.modes = ["overall", "interactivity", "segments"]
         self.fix_prob_df_path = get_fixation_probability_path(self)
         self.fix_prob_df_by_interactivity_path = get_fixation_probability_by_interactivity_path(self)
         self.fix_prob_df_by_interactivity_segment_path = get_fixation_probability_by_interactivity_segment_path(self)
