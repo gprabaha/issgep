@@ -1,12 +1,11 @@
 # src/socialgaze/features/fix_prob_detector.py
 
-import pdb
 import logging
 from typing import Optional, List, Tuple
-from tqdm import tqdm
 import pandas as pd
+from tqdm import tqdm
 
-from socialgaze.utils.saving_utils import save_df_to_pkl 
+from socialgaze.utils.saving_utils import save_df_to_pkl
 from socialgaze.utils.loading_utils import load_df_from_pkl
 
 logger = logging.getLogger(__name__)
@@ -14,297 +13,208 @@ logger = logging.getLogger(__name__)
 
 class FixProbDetector:
     def __init__(self, fixation_detector, config, interactivity_detector=None):
-        """
-        Args:
-            fixation_detector (FixationDetector): Initialized detector with fixation data.
-            config (FixationProbabilityConfig): Config with save/load path info.
-            interactivity_detector (Optional[InteractivityDetector]): For separating interactive/non-interactive calculations.
-        """
         self.detector = fixation_detector
         self.config = config
         self.interactivity_detector = interactivity_detector
         self.fixation_prob_df: Optional[pd.DataFrame] = None
         self.fixation_prob_df_by_interactivity: Optional[pd.DataFrame] = None
+        self.fixation_prob_df_by_interactivity_segment: Optional[pd.DataFrame] = None
 
-    def compute_and_save(self) -> pd.DataFrame:
-        logger.info("Computing overall fixation probabilities")
+
+    def compute_fixation_probabilities(self, mode: str = "overall") -> pd.DataFrame:
+        allowed_modes = {"overall", "interactivity", "segments"}
+        if mode not in allowed_modes:
+            raise ValueError(f"Invalid mode '{mode}'. Must be one of {allowed_modes}")
+
+        logger.info(f"Computing fixation probabilities (mode={mode})")
         joint_probs = []
 
         if self.detector.fixations is None:
-            logger.info("Fixations not loaded, using get_behavior_data to populate them.")
             self.detector.fixations = self.detector.get_behavior_data("fixations")
 
         if self.detector.gaze_data.run_lengths is None:
-            logger.info("Run lengths not loaded, using get_data('run_lengths') to populate them.")
             self.detector.gaze_data.run_lengths = self.detector.gaze_data.get_data("run_lengths")
+
+        if mode in {"interactivity", "segments"} and self.interactivity_detector is None:
+            raise ValueError("InteractivityDetector is required for mode '%s'" % mode)
 
         fixation_df = self.detector.fixations
         run_lengths_df = self.detector.gaze_data.run_lengths
         grouped = fixation_df.groupby(["session_name", "run_number"])
 
-        for (session, run), sub_df in tqdm(grouped, desc="Processing run"):
+        if mode in {"interactivity", "segments"}:
+            interactivity_df = self.interactivity_detector.get_interactivity_periods()
+
+        for (session, run), sub_df in tqdm(grouped, desc=f"Processing probabilities ({mode})"):
             try:
-                row = self.detector.config.ephys_days_and_monkeys_df
-                session_row = row[row["session_name"] == session].iloc[0]
-                m1 = session_row["m1"]
-                m2 = session_row["m2"]
+                session_row = self.detector.config.ephys_days_and_monkeys_df.query(
+                    "session_name == @session"
+                ).iloc[0]
+                m1, m2 = session_row["m1"], session_row["m2"]
             except IndexError:
                 logger.warning(f"Session {session} not found in ephys_days_and_monkeys_df.")
                 continue
 
             m1_df = sub_df[sub_df["agent"] == "m1"]
             m2_df = sub_df[sub_df["agent"] == "m2"]
-
             if m1_df.empty or m2_df.empty:
                 continue
 
             try:
-                run_length = run_lengths_df[
-                    (run_lengths_df["session_name"] == session) &
-                    (run_lengths_df["run_number"] == run)
-                ]["run_length"].values[0]
+                run_length = run_lengths_df.query(
+                    "session_name == @session and run_number == @run"
+                )["run_length"].values[0]
             except IndexError:
-                logger.warning(f"Run length for session {session}, run {run} not found in DataFrame.")
+                logger.warning(f"Run length for session {session}, run {run} not found.")
                 continue
 
-            available_categories = pd.concat([m1_df["category"], m2_df["category"]]).unique()
-            for category in sorted(available_categories):
-                m1_subset = m1_df[m1_df["category"] == category]
-                m2_subset = m2_df[m2_df["category"] == category]
+            if mode == "overall":
+                periods = [("all", [(0, run_length - 1)])]
+            elif mode == "interactivity":
+                int_df = interactivity_df.query(
+                    "session_name == @session and run_number == @run"
+                )
+                int_periods = list(zip(int_df["start"], int_df["stop"]))
+                nonint_periods = self._invert_periods(int_periods, run_length)
+                periods = [("interactive", int_periods), ("non_interactive", nonint_periods)]
+            elif mode == "segments":
+                int_df = interactivity_df.query(
+                    "session_name == @session and run_number == @run"
+                )
+                int_periods = list(zip(int_df["start"], int_df["stop"]))
+                nonint_periods = self._invert_periods(int_periods, run_length)
+                periods = [(f"{label}_{i}", [(s, e)])
+                           for label, plist in [("interactive", int_periods), ("non_interactive", nonint_periods)]
+                           for i, (s, e) in enumerate(plist)]
 
-                m1_indices = list(zip(m1_subset["start"], m1_subset["stop"]))
-                m2_indices = list(zip(m2_subset["start"], m2_subset["stop"]))
-
-                joint_duration = self._compute_joint_duration(m1_indices, m2_indices)
-                p_m1 = sum(stop - start + 1 for start, stop in m1_indices) / run_length
-                p_m2 = sum(stop - start + 1 for start, stop in m2_indices) / run_length
-                p_joint = joint_duration / run_length
-
-                joint_probs.append({
-                    "monkey_pair": f"{m1}-{m2}",
-                    "session_name": session,
-                    "run_number": run,
-                    "fixation_category": category,
-                    "P(m1)": p_m1,
-                    "P(m2)": p_m2,
-                    "P(m1)*P(m2)": p_m1 * p_m2,
-                    "P(m1&m2)": p_joint
-                })
-
-        self.fixation_prob_df = pd.DataFrame(joint_probs)
-        save_path = self.config.fix_prob_df_path
-        save_df_to_pkl(self.fixation_prob_df, save_path)
-        logger.info(f"Saved overall fixation probabilities to {save_path}")
-        return self.fixation_prob_df
-
-    def compute_by_interactivity_and_save(self) -> pd.DataFrame:
-        logger.info("Computing fixation probabilities split by interactivity")
-        joint_probs = []
-
-        if self.detector.fixations is None:
-            logger.info("Fixations not loaded, using get_behavior_data to populate them.")
-            self.detector.fixations = self.detector.get_behavior_data("fixations")
-
-        if self.detector.gaze_data.run_lengths is None:
-            logger.info("Run lengths not loaded, using get_data('run_lengths') to populate them.")
-            self.detector.gaze_data.run_lengths = self.detector.gaze_data.get_data("run_lengths")
-
-        if self.interactivity_detector is None:
-            raise ValueError("InteractivityDetector is required for interactivity-based fixation probability analysis.")
-
-        fixation_df = self.detector.fixations
-        run_lengths_df = self.detector.gaze_data.run_lengths
-        interactivity_df = self.interactivity_detector.get_interactivity_periods()
-
-        grouped = fixation_df.groupby(["session_name", "run_number"])
-
-        for (session, run), sub_df in tqdm(grouped, desc="Processing run with interactivity"):
-            try:
-                row = self.detector.config.ephys_days_and_monkeys_df
-                session_row = row[row["session_name"] == session].iloc[0]
-                m1 = session_row["m1"]
-                m2 = session_row["m2"]
-            except IndexError:
-                logger.warning(f"Session {session} not found in ephys_days_and_monkeys_df.")
-                continue
-
-            m1_df = sub_df[sub_df["agent"] == "m1"]
-            m2_df = sub_df[sub_df["agent"] == "m2"]
-
-            if m1_df.empty or m2_df.empty:
-                continue
-
-            try:
-                run_length = run_lengths_df[
-                    (run_lengths_df["session_name"] == session) &
-                    (run_lengths_df["run_number"] == run)
-                ]["run_length"].values[0]
-            except IndexError:
-                logger.warning(f"Run length for session {session}, run {run} not found in DataFrame.")
-                continue
-
-            # Get interactivity periods
-            int_df = interactivity_df[
-                (interactivity_df["session_name"] == session) &
-                (interactivity_df["run_number"] == run)
-            ]
-            int_periods = list(zip(int_df["start"], int_df["stop"]))
-            nonint_periods = self._invert_periods(int_periods, run_length)
-
-            for period_label, period_list in [("interactive", int_periods), ("non_interactive", nonint_periods)]:
-                total_duration = sum(end - start + 1 for start, end in period_list)
+            for label, period_list in periods:
+                total_duration = sum(e - s + 1 for s, e in period_list)
                 if total_duration == 0:
                     continue
 
-                m1_filtered = self._restrict_to_periods(m1_df, period_list)
-                m2_filtered = self._restrict_to_periods(m2_df, period_list)
+                m1_filt = self._restrict_to_periods(m1_df, period_list)
+                m2_filt = self._restrict_to_periods(m2_df, period_list)
 
-                available_categories = pd.concat([m1_filtered["category"], m2_filtered["category"]]).unique()
-                for category in sorted(available_categories):
-                    m1_subset = m1_filtered[m1_filtered["category"] == category]
-                    m2_subset = m2_filtered[m2_filtered["category"] == category]
+                categories = pd.concat([m1_filt["category"], m2_filt["category"]]).unique()
+                for cat in sorted(categories):
+                    m1_cat = m1_filt[m1_filt["category"] == cat]
+                    m2_cat = m2_filt[m2_filt["category"] == cat]
 
-                    m1_indices = list(zip(m1_subset["start"], m1_subset["stop"]))
-                    m2_indices = list(zip(m2_subset["start"], m2_subset["stop"]))
+                    m1_idx = list(zip(m1_cat["start"], m1_cat["stop"]))
+                    m2_idx = list(zip(m2_cat["start"], m2_cat["stop"]))
 
-                    joint_duration = self._compute_joint_duration(m1_indices, m2_indices)
-                    p_m1 = sum(stop - start + 1 for start, stop in m1_indices) / total_duration
-                    p_m2 = sum(stop - start + 1 for start, stop in m2_indices) / total_duration
-                    p_joint = joint_duration / total_duration
+                    joint = self._compute_joint_duration(m1_idx, m2_idx)
+                    p1 = sum(e - s + 1 for s, e in m1_idx) / total_duration
+                    p2 = sum(e - s + 1 for s, e in m2_idx) / total_duration
+                    p_joint = joint / total_duration
 
-                    joint_probs.append({
+                    row = {
                         "monkey_pair": f"{m1}-{m2}",
                         "session_name": session,
                         "run_number": run,
-                        "interactivity": period_label,
-                        "fixation_category": category,
-                        "P(m1)": p_m1,
-                        "P(m2)": p_m2,
-                        "P(m1)*P(m2)": p_m1 * p_m2,
+                        "fixation_category": cat,
+                        "P(m1)": p1,
+                        "P(m2)": p2,
+                        "P(m1)*P(m2)": p1 * p2,
                         "P(m1&m2)": p_joint
-                    })
+                    }
+                    if mode != "overall":
+                        row["interactivity"] = label
+                    if mode == "segments":
+                        row["segment_id"] = int(label.split("_")[-1])
+                        row["start"], row["stop"] = period_list[0]
 
-        self.fixation_prob_df_by_interactivity = pd.DataFrame(joint_probs)
-        save_path = self.config.fix_prob_df_by_interactivity_path
-        save_df_to_pkl(self.fixation_prob_df_by_interactivity, save_path)
-        logger.info(f"Saved fixation probabilities by interactivity to {save_path}")
-        return self.fixation_prob_df_by_interactivity
-
-
-    def compute_by_interactivity_segments_and_save(self) -> pd.DataFrame:
-        logger.info("Computing fixation probabilities per interactivity segment")
-        joint_probs = []
-
-        if self.detector.fixations is None:
-            logger.info("Fixations not loaded, using get_behavior_data to populate them.")
-            self.detector.fixations = self.detector.get_behavior_data("fixations")
-
-        if self.detector.gaze_data.run_lengths is None:
-            logger.info("Run lengths not loaded, using get_data('run_lengths') to populate them.")
-            self.detector.gaze_data.run_lengths = self.detector.gaze_data.get_data("run_lengths")
-
-        if self.interactivity_detector is None:
-            raise ValueError("InteractivityDetector is required for interactivity segment analysis.")
-
-        fixation_df = self.detector.fixations
-        run_lengths_df = self.detector.gaze_data.run_lengths
-        interactivity_df = self.interactivity_detector.get_interactivity_periods()
-
-        grouped = fixation_df.groupby(["session_name", "run_number"])
-
-        for (session, run), sub_df in tqdm(grouped, desc="Processing run with interactivity segments"):
-            try:
-                row = self.detector.config.ephys_days_and_monkeys_df
-                session_row = row[row["session_name"] == session].iloc[0]
-                m1 = session_row["m1"]
-                m2 = session_row["m2"]
-            except IndexError:
-                logger.warning(f"Session {session} not found in ephys_days_and_monkeys_df.")
-                continue
-
-            m1_df = sub_df[sub_df["agent"] == "m1"]
-            m2_df = sub_df[sub_df["agent"] == "m2"]
-
-            if m1_df.empty or m2_df.empty:
-                continue
-
-            try:
-                run_length = run_lengths_df[
-                    (run_lengths_df["session_name"] == session) &
-                    (run_lengths_df["run_number"] == run)
-                ]["run_length"].values[0]
-            except IndexError:
-                logger.warning(f"Run length for session {session}, run {run} not found in DataFrame.")
-                continue
-
-            # Get interactivity + non-interactivity segments
-            int_df = interactivity_df[
-                (interactivity_df["session_name"] == session) &
-                (interactivity_df["run_number"] == run)
-            ]
-            int_periods = list(zip(int_df["start"], int_df["stop"]))
-            nonint_periods = self._invert_periods(int_periods, run_length)
-
-            for period_label, period_list in [("interactive", int_periods), ("non_interactive", nonint_periods)]:
-                for segment_id, (p_start, p_stop) in enumerate(period_list):
-                    duration = p_stop - p_start + 1
-                    if duration == 0:
-                        continue
-
-                    m1_filtered = self._restrict_to_periods(m1_df, [(p_start, p_stop)])
-                    m2_filtered = self._restrict_to_periods(m2_df, [(p_start, p_stop)])
-
-                    available_categories = pd.concat([m1_filtered["category"], m2_filtered["category"]]).unique()
-                    for category in sorted(available_categories):
-                        m1_subset = m1_filtered[m1_filtered["category"] == category]
-                        m2_subset = m2_filtered[m2_filtered["category"] == category]
-
-                        m1_indices = list(zip(m1_subset["start"], m1_subset["stop"]))
-                        m2_indices = list(zip(m2_subset["start"], m2_subset["stop"]))
-
-                        joint_duration = self._compute_joint_duration(m1_indices, m2_indices)
-                        p_m1 = sum(stop - start + 1 for start, stop in m1_indices) / duration
-                        p_m2 = sum(stop - start + 1 for start, stop in m2_indices) / duration
-                        p_joint = joint_duration / duration
-
-                        joint_probs.append({
-                            "monkey_pair": f"{m1}-{m2}",
-                            "session_name": session,
-                            "run_number": run,
-                            "segment_id": segment_id,
-                            "interactivity": period_label,
-                            "start": p_start,
-                            "stop": p_stop,
-                            "fixation_category": category,
-                            "P(m1)": p_m1,
-                            "P(m2)": p_m2,
-                            "P(m1)*P(m2)": p_m1 * p_m2,
-                            "P(m1&m2)": p_joint
-                        })
+                    joint_probs.append(row)
 
         df = pd.DataFrame(joint_probs)
-        save_path = self.config.fix_prob_df_by_interactivity_segment_path
-        save_df_to_pkl(df, save_path)
-        logger.info(f"Saved per-segment interactivity fixation probabilities to {save_path}")
-        self.fixation_prob_df_by_interactivity_segment = df
+        self._save_output(df, mode)
         return df
 
 
-    def get_data(self) -> pd.DataFrame:
-        load_path = self.config.fix_prob_df_path
-        logger.info(f"Loading fixation probability dataframe from {load_path}")
-        self.fixation_prob_df = load_df_from_pkl(load_path)
-        return self.fixation_prob_df
+    def _save_output(self, df: pd.DataFrame, mode: str):
+        allowed_modes = {"overall", "interactivity", "segments"}
+        if mode not in allowed_modes:
+            raise ValueError(f"Invalid mode '{mode}' in _save_output. Must be one of {allowed_modes}")
+        
+        path_map = {
+            "overall": self.config.fix_prob_df_path,
+            "interactivity": self.config.fix_prob_df_by_interactivity_path,
+            "segments": self.config.fix_prob_df_by_interactivity_segment_path
+        }
+        save_path = path_map[mode]
+        save_df_to_pkl(df, save_path)
+        logger.info(f"Saved fixation probabilities ({mode}) to {save_path}")
+
+        if mode == "overall":
+            self.fixation_prob_df = df
+        elif mode == "interactivity":
+            self.fixation_prob_df_by_interactivity = df
+        elif mode == "segments":
+            self.fixation_prob_df_by_interactivity_segment = df
 
 
-    def get_data_by_interactivity(self) -> pd.DataFrame:
-        load_path = self.config.fix_prob_df_by_interactivity_path
-        logger.info(f"Loading interactivity-based fixation probability dataframe from {load_path}")
-        self.fixation_prob_df_by_interactivity = load_df_from_pkl(load_path)
-        return self.fixation_prob_df_by_interactivity
+    def _load_output(self, mode: Optional[str] = None):
+        allowed_modes = {"overall", "interactivity", "segments"}
+        path_map = {
+            "overall": self.config.fix_prob_df_path,
+            "interactivity": self.config.fix_prob_df_by_interactivity_path,
+            "segments": self.config.fix_prob_df_by_interactivity_segment_path
+        }
+
+        if mode is None:
+            for m in allowed_modes:
+                self._load_output(m)
+            return
+
+        if mode not in allowed_modes:
+            raise ValueError(f"Invalid mode '{mode}' in _load_output. Must be one of {allowed_modes}")
+
+        path = path_map[mode]
+        logger.info(f"Loading fixation probability data from {path}")
+        df = load_df_from_pkl(path)
+
+        if mode == "overall":
+            self.fixation_prob_df = df
+        elif mode == "interactivity":
+            self.fixation_prob_df_by_interactivity = df
+        elif mode == "segments":
+            self.fixation_prob_df_by_interactivity_segment = df
+
+
+
+    def get_data(self, mode: Optional[str] = "overall") -> pd.DataFrame | dict:
+        """
+        Load fixation probability data for a given mode.
+        If mode is None, load and return all as a dict.
+        """
+        if mode is None:
+            self._load_output(None)
+            return {
+                "overall": self.fixation_prob_df,
+                "interactivity": self.fixation_prob_df_by_interactivity,
+                "segments": self.fixation_prob_df_by_interactivity_segment
+            }
+
+        if mode == "overall":
+            if self.fixation_prob_df is None:
+                self._load_output("overall")
+            return self.fixation_prob_df
+
+        elif mode == "interactivity":
+            if self.fixation_prob_df_by_interactivity is None:
+                self._load_output("interactivity")
+            return self.fixation_prob_df_by_interactivity
+
+        elif mode == "segments":
+            if self.fixation_prob_df_by_interactivity_segment is None:
+                self._load_output("segments")
+            return self.fixation_prob_df_by_interactivity_segment
+
+        else:
+            raise ValueError(f"Invalid mode '{mode}' in get_data. Must be one of 'overall', 'interactivity', 'segments', or None.")
+
 
     def _compute_joint_duration(self, m1_ranges: List[Tuple[int, int]], m2_ranges: List[Tuple[int, int]]) -> int:
-        """Compute the overlapping duration between m1 and m2 fixation events using set intersection."""
         m1_timepoints = set()
         for start, stop in m1_ranges:
             m1_timepoints.update(range(start, stop + 1))
@@ -318,7 +228,6 @@ class FixProbDetector:
 
 
     def _restrict_to_periods(self, df: pd.DataFrame, periods: List[Tuple[int, int]]) -> pd.DataFrame:
-        """Return rows that overlap with any period and clip their start/stop within bounds."""
         result = []
         for start, stop in periods:
             sub = df[(df["stop"] >= start) & (df["start"] <= stop)].copy()
