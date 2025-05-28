@@ -397,6 +397,9 @@ def get_fixation_probability_path(config):
 def get_fixation_probability_by_interactivity_path(config):
     return Path(config.processed_data_dir) / "fix_prob_by_interactivity_df.pkl"
 
+def get_fixation_probability_by_interactivity_segment_path(config):
+    return Path(config.processed_data_dir) / "fix_prob_by_interactivity_segment_df.pkl"
+
 
 def get_fixation_probability_plot_dir(config) -> str:
     """

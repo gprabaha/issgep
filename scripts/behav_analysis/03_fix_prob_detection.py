@@ -39,6 +39,11 @@ def main():
     print("\n=== Interactivity-Split Fixation Probabilities ===")
     print(fix_prob_df_by_interactivity.head(10))
 
+    # Compute interactivity-segment-separated fixation probabilities
+    fix_prob_df_by_interactivity_Segments = fix_prob_detector.compute_by_interactivity_segments_and_save()
+    print("\n=== Interactivity-Segment-Split Fixation Probabilities ===")
+    print(fix_prob_df_by_interactivity_Segments.head(10))
+
 
 if __name__ == "__main__":
     main()

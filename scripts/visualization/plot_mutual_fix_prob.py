@@ -4,7 +4,8 @@ from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fix_prob_config import FixProbConfig
 from socialgaze.visualization.fixation_probability_plotter import (
     plot_joint_vs_marginal_violin,
-    plot_joint_vs_marginal_violin_by_interactivity
+    plot_joint_vs_marginal_violin_by_interactivity,
+    plot_joint_vs_marginal_violin_by_interactivity_segment,
 )
 
 
@@ -17,6 +18,8 @@ def main():
 
     # Plot separated by interactivity
     plot_joint_vs_marginal_violin_by_interactivity(fix_prob_config)
+
+    plot_joint_vs_marginal_violin_by_interactivity_segment(fix_prob_config)
 
 
 if __name__ == "__main__":
