@@ -55,21 +55,19 @@ def plot_joint_vs_marginal_violin(config, detector, mode: str):
     _finalize_and_save(fig, config.plot_dir, filename)
 
 
-
 def _plot_violin_core(ax, full_df, category, monkey_color_dict, violin_palette):
     
-    for col in ["P(m1)*P(m2)", "P(m1&m2)"]:
-        full_df[col] = full_df.groupby("fixation_category")[col].transform(
-            lambda x: pd.Series(winsorize(x, limits=[0.01, 0.01]), index=x.index)
-        )
-
     melted = full_df.melt(
         id_vars=["monkey_pair"],
         value_vars=["P(m1)*P(m2)", "P(m1&m2)"],
         var_name="Probability Type",
         value_name="Probability"
     )
-
+    
+    #!! Outlier removal:  Winsorize within each "Probability Type"
+    melted["Probability"] = melted.groupby("Probability Type")["Probability"].transform(
+        lambda x: pd.Series(winsorize(x, limits=[0.05, 0.05]), index=x.index)
+    )
 
     sns.violinplot(
         data=melted,
@@ -85,11 +83,7 @@ def _plot_violin_core(ax, full_df, category, monkey_color_dict, violin_palette):
     )
 
     # Overlay medians: average per monkey_pair
-    agg_df = full_df.groupby("monkey_pair")[["P(m1)*P(m2)", "P(m1&m2)"]].median().reset_index()
-    mp_data = {
-        row["monkey_pair"]: [row["P(m1)*P(m2)"], row["P(m1&m2)"]]
-        for _, row in agg_df.iterrows()
-    }
+    mp_data = _get_monkey_pair_medians(full_df)
 
     _overlay_medians(ax, mp_data, monkey_color_dict)
     _annotate_ks(ax, full_df)
@@ -114,6 +108,13 @@ def _get_monkey_palette(monkey_pairs):
     return {mp: palette[i] for i, mp in enumerate(monkey_pairs)}
 
 
+def _get_monkey_pair_medians(full_df: pd.DataFrame) -> dict:
+    agg_df = full_df.groupby("monkey_pair")[["P(m1)*P(m2)", "P(m1&m2)"]].median().reset_index()
+    return {
+        row["monkey_pair"]: [row["P(m1)*P(m2)"], row["P(m1&m2)"]]
+        for _, row in agg_df.iterrows()
+    }
+
 def _overlay_medians(ax, monkey_pair_data, monkey_color_dict):
     for mp, y_vals in monkey_pair_data.items():
         if not isinstance(y_vals, list) or len(y_vals) != 2:
@@ -133,13 +134,13 @@ def _annotate_ks(ax, group_df):
 
 def _get_significance_marker(p_val):
     if p_val < 0.001:
-        return '***'
+        return f'***; p-val: {p_val}'
     elif p_val < 0.01:
-        return '**'
+        return f'**; p-val: {p_val}'
     elif p_val < 0.05:
-        return '*'
+        return f'*; p-val: {p_val}'
     else:
-        return 'NS'
+        return f'NS; p-val: {p_val}'
 
 
 def _finalize_and_save(fig, save_dir, filename):

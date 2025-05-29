@@ -263,7 +263,7 @@ class FixationDetector:
             logger.info("'category' column not found in fixations. Running add_fixation_category_column().")
             self.add_fixation_category_column()
 
-        run_lengths_df = self.gaze_data.get_run_lengths()
+        run_lengths_df = self.gaze_data.get_data('run_lengths')
         vectors = []
 
         grouped = self.fixations.groupby(["session_name", "run_number", "agent"])
