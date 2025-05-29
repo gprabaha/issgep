@@ -163,7 +163,6 @@ class InteractivityDetector:
         self.interactivity_periods = pd.DataFrame(results)
         return self.interactivity_periods 
 
-    
 
     def save_interactivity_periods(self, path: str = None):
         """Saves the interactivity_df to disk as a pickle file."""

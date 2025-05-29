@@ -320,6 +320,74 @@ class FixationDetector:
         else:
             logger.warning(f"No fixation_binary_vectors.pkl found at {path}")
 
+
+    def generate_saccade_binary_vectors(self, return_df: bool = False) -> Optional[pd.DataFrame]:
+        """
+        Generates binary vectors for each saccade 'from' and 'to' category per run and agent.
+        Stores the result in self.saccade_binary_vectors and optionally returns it.
+
+        Args:
+            return_df (bool): If True, returns the binary vector DataFrame.
+
+        Returns:
+            Optional[pd.DataFrame]: Long-format DataFrame of binary vectors (if return_df=True).
+        """
+        logger.info("\n ** Generating saccade binary vectors...")
+
+        if self.saccades is None or self.saccades.empty:
+            logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
+            self.load_dataframes("saccades")
+
+        if not {"from", "to", "start", "stop"}.issubset(self.saccades.columns):
+            logger.error("Saccade dataframe must contain 'from', 'to', 'start', and 'stop' columns.")
+            return None
+
+        run_lengths_df = self.gaze_data.get_data('run_lengths')
+        vectors = []
+
+        grouped = self.saccades.groupby(["session_name", "run_number", "agent"])
+        for (session, run, agent), group in grouped:
+            run_len_match = run_lengths_df.query("session_name == @session and run_number == @run")
+            if run_len_match.empty:
+                logger.warning("Run length missing for %s-%s-%s — skipping", session, run, agent)
+                continue
+            run_length = int(run_len_match["run_length"].values[0])
+
+            from_dict = defaultdict(lambda: np.zeros(run_length, dtype=int))
+            to_dict = defaultdict(lambda: np.zeros(run_length, dtype=int))
+
+            for _, row in group.iterrows():
+                start, stop = row["start"], row["stop"]
+                from_cat, to_cat = row["from"], row["to"]
+                from_dict[from_cat][start:stop + 1] = 1
+                to_dict[to_cat][start:stop + 1] = 1
+
+            for cat, vec in from_dict.items():
+                vectors.append({
+                    "session_name": session,
+                    "run_number": run,
+                    "agent": agent,
+                    "from_or_to": "from",
+                    "saccade_type": cat,
+                    "binary_vector": vec
+                })
+
+            for cat, vec in to_dict.items():
+                vectors.append({
+                    "session_name": session,
+                    "run_number": run,
+                    "agent": agent,
+                    "from_or_to": "to",
+                    "saccade_type": cat,
+                    "binary_vector": vec
+                })
+
+        result_df = pd.DataFrame(vectors)
+        self.saccade_binary_vectors = result_df
+        logger.info("Saccade binary vector generation complete.")
+        if return_df:
+            return result_df
+
     # -------------------
     # Helper methods
     # -------------------

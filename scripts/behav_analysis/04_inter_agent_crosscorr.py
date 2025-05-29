@@ -30,3 +30,7 @@ def main():
         fixation_detector=fixation_detector,
         interactivity_detector=interactivity_detector
     )
+
+
+if __name__ == "__main__":
+    main()
