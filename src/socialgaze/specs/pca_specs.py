@@ -7,7 +7,6 @@ from typing import List, Optional
 @dataclass(frozen=True)
 class PCAFitSpec:
     name: str
-    trialwise: bool
     categories: Optional[List[str]] = None
     split_by_interactive: Optional[bool] = None
 
@@ -15,57 +14,34 @@ class PCAFitSpec:
 @dataclass(frozen=True)
 class PCATransformSpec:
     name: str
-    trialwise: bool
     categories: Optional[List[str]] = None
     split_by_interactive: Optional[bool] = None
+
 
 
 FIT_SPECS = [
     PCAFitSpec(
         name="fit_avg_face",
-        trialwise=False,
         categories=["face"],
         split_by_interactive=None,
     ),
     PCAFitSpec(
-        name="fit_trialwise_face",
-        trialwise=True,
+        name="fit_int_non_int_face",
         categories=["face"],
-        split_by_interactive=None,
+        split_by_interactive=True,
     ),
     PCAFitSpec(
         name="fit_avg_obj",
-        trialwise=False,
-        categories=["object"],
-        split_by_interactive=None,
-    ),
-    PCAFitSpec(
-        name="fit_trialwise_obj",
-        trialwise=True,
         categories=["object"],
         split_by_interactive=None,
     ),
     PCAFitSpec(
         name="fit_avg_face_obj",
-        trialwise=False,
         categories=["face", "object"],
         split_by_interactive=None,
     ),
     PCAFitSpec(
-        name="fit_trialwise_face_obj",
-        trialwise=True,
-        categories=["face", "object"],
-        split_by_interactive=None,
-    ),
-    PCAFitSpec(
-        name="fit_avg_interactive_and_noninteractive_face_obj",
-        trialwise=False,
-        categories=["face", "object"],
-        split_by_interactive=True,
-    ),
-    PCAFitSpec(
-        name="fit_trialwise_interactive_and_noninteractive_face_obj",
-        trialwise=True,
+        name="fit_int_non_int_face_obj",
         categories=["face", "object"],
         split_by_interactive=True,
     ),
@@ -74,53 +50,31 @@ FIT_SPECS = [
 TRANSFORM_SPECS = [
     PCATransformSpec(
         name="transform_avg_face",
-        trialwise=False,
         categories=["face"],
         split_by_interactive=None,
     ),
     PCATransformSpec(
-        name="transform_trialwise_face",
-        trialwise=True,
+        name="transform_int_non_int_face",
         categories=["face"],
-        split_by_interactive=None,
+        split_by_interactive=True,
     ),
     PCATransformSpec(
         name="transform_avg_obj",
-        trialwise=False,
-        categories=["object"],
-        split_by_interactive=None,
-    ),
-    PCATransformSpec(
-        name="transform_trialwise_obj",
-        trialwise=True,
         categories=["object"],
         split_by_interactive=None,
     ),
     PCATransformSpec(
         name="transform_avg_face_obj",
-        trialwise=False,
         categories=["face", "object"],
         split_by_interactive=None,
     ),
     PCATransformSpec(
-        name="transform_trialwise_face_obj",
-        trialwise=True,
-        categories=["face", "object"],
-        split_by_interactive=None,
-    ),
-    PCATransformSpec(
-        name="transform_avg_interactive_and_noninteractive_face_obj",
-        trialwise=False,
-        categories=["face", "object"],
-        split_by_interactive=True,
-    ),
-    PCATransformSpec(
-        name="transform_trialwise_interactive_and_noninteractive_face_obj",
-        trialwise=True,
+        name="transform_int_non_int_face_obj",
         categories=["face", "object"],
         split_by_interactive=True,
     ),
 ]
+
 
 def get_all_fit_transform_pairs():
     """

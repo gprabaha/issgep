@@ -1,5 +1,6 @@
 # src/socialgaze/features/psth_extractor.py
 
+import pdb
 import os
 import logging
 from typing import Optional, List
@@ -279,7 +280,9 @@ class PSTHExtractor:
     def compute_avg_psth_per_category_and_interactivity(self):
         """
         Computes average PSTH per unit across fixation categories and interactivity,
-        grouping only by unit_uuid, but retaining session/run in the output.
+        with the following logic:
+        - 'face' fixations are split into 'face_interactive' and 'face_non_interactive'
+        - 'object' fixations are kept as a single category, ignoring interactivity
         Stores result in self.avg_psth_per_category_and_interactivity.
         """
         if self.psth_per_trial is None or self.psth_per_trial.empty:
@@ -288,10 +291,26 @@ class PSTHExtractor:
 
         logger.info("Computing average PSTH per unit per fixation category and interactivity...")
 
-        rows = []
-        grouped = self.psth_per_trial.groupby(["unit_uuid", "category", "is_interactive"])
+        # Create a new column to hold adjusted category values
+        def categorize(row):
+            if row["category"] == "face":
+                if row["is_interactive"] == "interactive":
+                    return "face_interactive"
+                elif row["is_interactive"] == "non-interactive":
+                    return "face_non_interactive"
+                else:
+                    raise ValueError(f"Unexpected interactivity value: {row['is_interactive']}")
+            else:
+                return row["category"]
 
-        for (unit_uuid, category, is_interactive), group in grouped:
+
+        df = self.psth_per_trial.copy()
+        df["adjusted_category"] = df.apply(categorize, axis=1)
+
+        rows = []
+        grouped = df.groupby(["unit_uuid", "adjusted_category"])
+
+        for (unit_uuid, adjusted_category), group in grouped:
             psth_array = np.stack(group["firing_rate"].apply(np.array).values)
             mean_psth = psth_array.mean(axis=0)
 
@@ -303,14 +322,14 @@ class PSTHExtractor:
                     "unit_uuid": unit_uuid,
                     "region": row.get("region"),
                     "channel": row.get("channel"),
-                    "category": category,
-                    "is_interactive": is_interactive,
+                    "category": adjusted_category,
                     "avg_firing_rate": mean_psth.tolist()
                 })
-                break
+                break  # Use the first row for metadata
 
         self.avg_psth_per_category_and_interactivity = pd.DataFrame(rows)
-        logger.info(f"Computed average PSTH for {len(self.avg_psth_per_category_and_interactivity)} unit-category-interactivity combinations.")
+        logger.info(f"Computed average PSTH for {len(self.avg_psth_per_category_and_interactivity)} unit-category combinations.")
+
 
 #---------------------------------------------------
 # == Support functions for PSTH computing methods ==

@@ -39,7 +39,6 @@ class PCProjector:
     def fit(self, fit_spec: PCAFitSpec):
         logger.info(f"Fitting PCA using: {fit_spec.name}")
         df = self._get_filtered_psth_df(
-            trialwise=fit_spec.trialwise,
             categories=fit_spec.categories,
             split_by_interactive=fit_spec.split_by_interactive
         )
@@ -49,7 +48,7 @@ class PCProjector:
 
         for region in df["region"].unique():
             region_df = df[df["region"] == region]
-            pop_mat, unit_order, category_order, min_fixations, _ = self._build_population_matrix(region_df, fit_spec)
+            pop_mat, unit_order, category_order, sample_metadata = self._build_population_matrix(region_df, fit_spec)
             
             pca = PCA(n_components=min(20, pop_mat.shape[0]))
             pca.fit(pop_mat)
@@ -58,7 +57,6 @@ class PCProjector:
             self.unit_and_category_orders[fit_spec.name][region] = {
                 "unit_order": unit_order,
                 "category_order": category_order,
-                "trials_per_category": min_fixations,
             }
 
             save_pickle(pca, get_pc_fit_model_path(self.config.pc_projection_base_dir, fit_spec.name, region))
@@ -69,7 +67,6 @@ class PCProjector:
         logger.info(f"Projecting using fit: {fit_spec_name} and transform: {transform_spec.name}")
         
         df = self._get_filtered_psth_df(
-            trialwise=transform_spec.trialwise,
             categories=transform_spec.categories,
             split_by_interactive=transform_spec.split_by_interactive
         )
@@ -88,9 +85,7 @@ class PCProjector:
             pca, orders = self.get_fit(fit_spec_name, region)
 
             # Build population matrix and metadata
-            pop_mat, unit_order, category_order, min_fixations, sample_metadata = self._build_population_matrix(
-                region_df, transform_spec
-            )
+            pop_mat, unit_order, category_order, sample_metadata = self._build_population_matrix(region_df, transform_spec)
 
             # Project and reshape
             projected = pca.transform(pop_mat)
@@ -100,12 +95,10 @@ class PCProjector:
                 region=region,
                 n_components=pca.n_components_,
                 transform_spec=transform_spec,
-                min_fixations=min_fixations
             )
 
             # Store and save
             self.pc_projection_dfs[key][region] = proj_df
-            self.pc_projection_meta[key]["trials_per_category"] = min_fixations
             self.pc_projection_meta[key]["category_order"] = category_order
 
             save_df_to_pkl(
@@ -165,12 +158,26 @@ class PCProjector:
         return keys_to_regions
 
 
+    def _get_filtered_psth_df(self, categories, split_by_interactive, agent=None):
+        """
+        Returns a filtered PSTH DataFrame based on specified categories, interactivity split, and agent.
 
-    def _get_filtered_psth_df(self, trialwise, categories, split_by_interactive, agent=None):
-        if trialwise:
-            df = self.psth_extractor.get_psth("trial_wise")
-        elif split_by_interactive:
+        If split_by_interactive is True and 'face' is in categories, then we search for
+        'face_interactive' and 'face_non_interactive' in the already-split DataFrame.
+        """
+        if split_by_interactive:
             df = self.psth_extractor.get_psth("by_interactivity")
+
+            # Expand categories to match split naming
+            if categories is not None:
+                expanded_categories = []
+                for cat in categories:
+                    if cat == "face":
+                        expanded_categories.extend(["face_interactive", "face_non_interactive"])
+                    else:
+                        expanded_categories.append(cat)
+                categories = expanded_categories
+
         else:
             df = self.psth_extractor.get_psth("by_category")
 
@@ -180,115 +187,56 @@ class PCProjector:
         df = df[df["agent"] == (agent or "m1")]
         return df
 
+
     def _build_population_matrix(self, region_df, specs):
-        trialwise = specs.trialwise
+        """
+        Builds the population matrix used for PCA fitting or projection.
+        Uses avg_firing_rate columns grouped by unit_uuid and category.
+        """
         split_by_interactive = specs.split_by_interactive
         base_categories = specs.categories or sorted(region_df["category"].unique())
+        assert all(cat in {"face", "object", "out_of_roi"} for cat in base_categories)
+
         unit_uuids = sorted(region_df["unit_uuid"].unique())
         sample_metadata = []
 
-        if not trialwise:
-            if not split_by_interactive:
-                category_order = base_categories
-                pop_list = []
-                for unit_uuid in unit_uuids:
-                    unit_frs = []
-                    for cat in category_order:
-                        row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
-
-                        if row.shape[0] != 1:
-                            raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
-                        fr = np.array(row.iloc[0]["avg_firing_rate"])
-                        for t in range(len(fr)):
-                            sample_metadata.append({
-                                "agent": row.iloc[0]["agent"],
-                                "unit_uuid": unit_uuid,
-                                "category": cat,
-                                "timepoint_index": t,
-                            })
-                        unit_frs.append(fr)
-                    pop_list.append(np.concatenate(unit_frs))
-                pop_mat = np.stack(pop_list, axis=0).T
-                return pop_mat, unit_uuids, category_order, None, sample_metadata
-
-            else:
-                interactive_conditions = ["interactive", "non-interactive"]
-                category_order = [f"{cat}_{inter}" for cat in base_categories for inter in interactive_conditions]
-                pop_list = []
-                for unit_uuid in unit_uuids:
-                    unit_frs = []
-                    for cat in base_categories:
-                        for inter in interactive_conditions:
-                            row = region_df.query("unit_uuid == @unit_uuid and category == @cat and is_interactive == @inter")
-                            if row.shape[0] != 1:
-                                raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, {inter}, got {row.shape[0]}")
-                            fr = np.array(row.iloc[0]["avg_firing_rate"])
-                            for t in range(len(fr)):
-                                sample_metadata.append({
-                                    "agent": row.iloc[0]["agent"],
-                                    "unit_uuid": unit_uuid,
-                                    "category": cat,
-                                    "interactivity": inter,
-                                    "timepoint_index": t
-                                })
-                            unit_frs.append(fr)
-                    pop_list.append(np.concatenate(unit_frs))
-                pop_mat = np.stack(pop_list, axis=0).T
-                return pop_mat, unit_uuids, category_order, None, sample_metadata
-
-        else:
-            interactive_conditions = ["interactive", "non-interactive"] if split_by_interactive else [None]
-            all_keys = [(cat, inter) for cat in base_categories for inter in interactive_conditions]
-            min_fixations = float("inf")
-
-            for cat, inter in all_keys:
-                if inter is None:
-                    subset = region_df.query("category == @cat")
+        # If interactivity is split, categories already include it (e.g., "face_interactive")
+        if split_by_interactive:
+            category_order = []
+            for cat in base_categories:
+                if cat == "face":
+                    category_order.extend(["face_interactive", "face_non_interactive"])
                 else:
-                    subset = region_df.query("category == @cat and is_interactive == @inter")
-                
-                grouped = subset.groupby("unit_uuid").size()
-                if not grouped.empty:
-                    min_fixations = min(min_fixations, grouped.min())
+                    category_order.append(cat)
+        else:
+            category_order = base_categories
 
-            if min_fixations == 0:
-                raise ValueError("One or more (category, interaction, session) groups have zero fixations")
 
-            category_order = [
-                f"{cat}_{inter}" if inter is not None else cat
-                for cat, inter in all_keys
-            ]
+        pop_list = []
+        for unit_uuid in unit_uuids:
+            unit_frs = []
+            for cat in category_order:
+                row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
 
-            pop_list = []
+                if row.shape[0] != 1:
+                    pdb.set_trace()
+                    raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
 
-            for unit_uuid in unit_uuids:
-                unit_frs = []
-                for cat, inter in all_keys:
-                    if inter is None:
-                        subset = region_df.query("category == @cat")
-                    else:
-                        subset = region_df.query("category == @cat and is_interactive == @inter")
-                    if len(subset) < min_fixations:
-                        raise ValueError(f"Not enough trials for {unit_uuid} in category {cat} (interactivity: {inter})")
-                        
-                    sampled = subset.sample(n=min_fixations, random_state=42)
-                    for trial_index, (_, row) in enumerate(sampled.iterrows()):
-                        fr = np.array(row["firing_rate"])
-                        for t in range(len(fr)):
-                            sample_metadata.append({
-                                "session_name": row["session_name"],
-                                "run_number": row["run_number"],
-                                "agent": row["agent"],
-                                "unit_uuid": unit_uuid,
-                                "category": cat,
-                                "interactivity": inter,
-                                "trial_index": trial_index,
-                                "timepoint_index": t
-                            })
-                        unit_frs.append(fr)
-                pop_list.append(np.concatenate(unit_frs))
-            pop_mat = np.stack(pop_list, axis=0).T
-            return pop_mat, unit_uuids, category_order, min_fixations, sample_metadata
+                fr = np.array(row.iloc[0]["avg_firing_rate"])
+                for t in range(len(fr)):
+                    sample_metadata.append({
+                        "agent": row.iloc[0]["agent"],
+                        "unit_uuid": unit_uuid,
+                        "category": cat,
+                        "timepoint_index": t,
+                    })
+                unit_frs.append(fr)
+
+            pop_list.append(np.concatenate(unit_frs))
+
+        pop_mat = np.stack(pop_list, axis=0).T
+        return pop_mat, unit_uuids, category_order, sample_metadata
+
 
 
     def _reshape_projection_as_timeseries_dataframe(
@@ -298,62 +246,52 @@ class PCProjector:
         region: str,
         n_components: int,
         transform_spec: PCATransformSpec,
-        min_fixations: int
     ) -> pd.DataFrame:
         """
         Reshapes PCA projections into one row per PC dimension and condition, with timeseries as a vector.
-        Assumes projected.shape[0] == n_timepoints × n_categories × n_interactivity × n_trials
+        Assumes projected.shape[0] == n_timepoints x n_unit x n_category
 
         Args:
             projected: np.ndarray of shape (n_samples, n_components)
-            sample_metadata: List of dicts describing each sample (should be repeated over units)
+            sample_metadata: List of dicts describing each sample (one per timepoint x unit x category)
             region: brain region name
             n_components: number of PCA components
-            transform_spec: used to check trialwise and interactivity
-            min_fixations: number of trials per category (if trialwise), otherwise 1
+            transform_spec: category and interactivity spec used for filtering
 
         Returns:
-            pd.DataFrame with one row per PC dimension per condition
+            pd.DataFrame with one row per PC dimension per category
         """
-        # === Step 1: Infer unique timepoints
+        # Step 1: Extract unique timepoints
         unique_timepoints = sorted(set(meta["timepoint_index"] for meta in sample_metadata))
         n_timepoints = len(unique_timepoints)
 
-        # === Step 2: Determine how many projected blocks we expect
-        categories = transform_spec.categories or sorted(set(meta["category"] for meta in sample_metadata))
-        n_categories = len(categories)
-        n_interactive = 2 if transform_spec.split_by_interactive else 1
-        n_trials = min_fixations if transform_spec.trialwise else 1
-
-        expected_rows = n_timepoints * n_categories * n_interactive * n_trials
-        assert projected.shape[0] == expected_rows, (
-            f"Expected {expected_rows} rows in projected, got {projected.shape[0]} "
-            f"(n_timepoints={n_timepoints}, n_categories={n_categories}, "
-            f"n_interactive={n_interactive}, n_trials={n_trials})"
-        )
-
-        # === Step 3: Group by condition — one entry per condition, ignore units and timepoints
+        # Step 2: Extract unique (category, agent, session, run) combinations
         grouped_keys = []
         seen_keys = set()
         for meta in sample_metadata:
             key = (
                 meta["category"],
-                meta.get("interactivity", None),
-                meta.get("trial_index", None),
-                meta.get("session_name", None),
-                meta.get("run_number", None),
-                meta.get("agent", None),
+                meta.get("agent"),
+                meta.get("session_name"),
+                meta.get("run_number"),
             )
             if key not in seen_keys:
                 seen_keys.add(key)
                 grouped_keys.append(key)
 
-        # === Step 4: Sort keys (optional but ensures deterministic output)
+        # Ensure deterministic ordering
         grouped_keys = sorted(grouped_keys)
 
-        # === Step 5: Iterate and extract projections
+        # Step 3: Sanity check shape
+        expected_rows = len(grouped_keys) * n_timepoints
+        assert projected.shape[0] == expected_rows, (
+            f"Expected {expected_rows} rows in projected, got {projected.shape[0]} "
+            f"(n_timepoints={n_timepoints}, n_conditions={len(grouped_keys)})"
+        )
+
+        # Step 4: Reshape and build final dataframe
         rows = []
-        for i, (cat, inter, trial, session, run, agent) in enumerate(grouped_keys):
+        for i, (cat, agent, session, run) in enumerate(grouped_keys):
             start = i * n_timepoints
             end = start + n_timepoints
             matrix = projected[start:end]  # shape: (n_timepoints, n_components)
@@ -363,15 +301,14 @@ class PCProjector:
                     "region": region,
                     "pc_dimension": dim,
                     "category": cat,
-                    "is_interactive": inter,
-                    "trial_index": trial,
+                    "agent": agent,
                     "session": session,
                     "run": run,
-                    "agent": agent,
-                    "pc_timeseries": matrix[:, dim].tolist()
+                    "pc_timeseries": matrix[:, dim].tolist(),
                 })
 
         return pd.DataFrame(rows)
+
 
 
     def _load_or_get_fit_model(self, fit_name, region):
@@ -382,6 +319,7 @@ class PCProjector:
             self.pc_fit_models[fit_name][region] = load_pickle(path)
         return self.pc_fit_models[fit_name][region]
 
+
     def _load_or_get_fit_orders(self, fit_name, region):
         if fit_name not in self.unit_and_category_orders:
             self.unit_and_category_orders[fit_name] = {}
@@ -389,6 +327,7 @@ class PCProjector:
             path = get_pc_fit_orders_path(self.config.pc_projection_base_dir, fit_name, region)
             self.unit_and_category_orders[fit_name][region] = load_pickle(path)
         return self.unit_and_category_orders[fit_name][region]
+
 
     def load_projection(self, fit_name, transform_name, region):
         path = get_pc_projection_path(self.config.pc_projection_base_dir, fit_name, transform_name, region)
