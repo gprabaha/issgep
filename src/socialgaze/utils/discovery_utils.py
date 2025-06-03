@@ -107,7 +107,7 @@ def filter_sessions_with_ephys(
             filtered_session_names.append(session_name)
             filtered_runs_by_session[session_name] = runs_by_session[session_name]
         else:
-            logger.info(f"Discarding session {session_name} — no ephys data found.")
+            # logger.warning(f"Discarding session {session_name} — no ephys data found.")
 
     return filtered_session_names, filtered_runs_by_session
 

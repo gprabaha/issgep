@@ -6,6 +6,7 @@ from typing import List, Dict
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
+from scipy.spatial import procrustes
 
 from os import listdir
 from os.path import join, isdir
@@ -157,23 +158,27 @@ class PCProjector:
 
     def compare_category_trajectories(self, fit_name: str, transform_name: str, region: str):
         """
-        Computes Euclidean distance and mean vector angle between all category trajectories
-        in the PCA-projected space for a given region and fit/transform combination.
+        Computes distance metrics between all category trajectories in PCA-projected space:
+        - Euclidean distance
+        - Mean vector angle
+        - Trajectory length difference
+        - Procrustes disparity
 
         Returns:
-            List[Dict] with keys: 'category_1', 'category_2', 'euclidean_distance', 'vector_angle_deg'
+            List[Dict] with keys:
+                'category_1', 'category_2', 
+                'euclidean_distance', 'vector_angle_deg',
+                'trajectory_length_diff', 'procrustes_disparity'
         """
         proj_df, _ = self.get_projection(fit_name, transform_name, region)
         results = []
 
         categories = sorted(proj_df["category"].unique())
-        
+
         # Build: category -> matrix (shape: (n_components, n_timepoints))
         cat_to_matrix = {}
         for cat in categories:
             cat_df = proj_df[proj_df["category"] == cat]
-
-            # Each row is one pc_dimension; sort ensures correct order
             matrices = [np.array(row["pc_timeseries"]) for _, row in cat_df.sort_values("pc_dimension").iterrows()]
             mat = np.stack(matrices)  # shape: (n_components, n_timepoints)
             cat_to_matrix[cat] = mat
@@ -184,21 +189,36 @@ class PCProjector:
                 mat1 = cat_to_matrix[cat1]
                 mat2 = cat_to_matrix[cat2]
 
-                # Euclidean distance over the full matrix (not flattened)
+                # Euclidean distance
                 eucl_dist = np.linalg.norm(mat1 - mat2)
 
-                # Mean vector angle over timepoints (transpose to (T, N))
+                # Mean angle (transpose to (T, N))
                 angle_rad = mean_vector_angle(mat1.T, mat2.T)
                 angle_deg = np.degrees(angle_rad)
+
+                # Trajectory lengths (along time)
+                len1 = np.sum(np.linalg.norm(np.diff(mat1.T, axis=0), axis=1))
+                len2 = np.sum(np.linalg.norm(np.diff(mat2.T, axis=0), axis=1))
+                traj_len_diff = len1 - len2
+
+                # Procrustes disparity
+                try:
+                    _, _, disparity = procrustes(mat1.T, mat2.T)
+                except Exception as e:
+                    logger.warning(f"Procrustes failed for {cat1} vs {cat2}: {e}")
+                    disparity = np.nan
 
                 results.append({
                     "category_1": cat1,
                     "category_2": cat2,
                     "euclidean_distance": eucl_dist,
-                    "vector_angle_deg": angle_deg
+                    "vector_angle_deg": angle_deg,
+                    "trajectory_length_diff": traj_len_diff,
+                    "procrustes_disparity": disparity
                 })
 
         return results
+
 
 
 

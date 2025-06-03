@@ -35,17 +35,8 @@ from socialgaze.utils.parallel_utils import run_joblib_parallel
 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def should_compare(transform_spec):
-    if not transform_spec.categories:
-        return False
-    return (
-        len(transform_spec.categories) > 1
-        or (transform_spec.categories == ["face"] and transform_spec.split_by_interactive)
-    )
+logging.basicConfig(level=logging.INFO)
 
 
 def main():
@@ -104,8 +95,15 @@ def main():
         # Compare trajectories
         logger.info("\n--- Comparing category trajectories ---")
 
+        # Define allowed spec names
+        allowed_fits = {"fit_avg_face_obj", "fit_int_non_int_face_obj"}
+        allowed_transforms = {"transform_avg_face_obj", "transform_int_non_int_face_obj"}
+
         for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
-            if not should_compare(transform_spec):
+            if (
+                fit_spec.name not in allowed_fits
+                or transform_spec.name not in allowed_transforms
+            ):
                 continue
 
             key = f"{fit_spec.name}__{transform_spec.name}"
@@ -119,7 +117,9 @@ def main():
                         print(
                             f"{res['category_1']} vs {res['category_2']} | "
                             f"Euclidean Distance: {res['euclidean_distance']:.4f} | "
-                            f"Angle: {res['vector_angle_deg']:.2f}°"
+                            f"Angle: {res['vector_angle_deg']:.2f}° | "
+                            f"Trajectory Length diff: {res['trajectory_length_diff']:.4f} | "
+                            f"Procrustes Disparity: {res['procrustes_disparity']:.4f}"
                         )
                 except Exception as e:
                     logger.warning(f"Failed to compare trajectories for {key} in region {region}: {e}")
