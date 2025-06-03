@@ -7,6 +7,7 @@ Description:
     This script initializes all necessary data/config objects and runs PCA on 
     population-averaged firing rates grouped by fixation category or interactivity.
     The resulting PCA fits and projections are saved to disk for downstream analyses.
+    Then, it computes distances and angles between projected trajectories for each transform.
 
 Run:
     python scripts/neural_analysis/02_pc_projection.py
@@ -38,6 +39,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def should_compare(transform_spec):
+    if not transform_spec.categories:
+        return False
+    return (
+        len(transform_spec.categories) > 1
+        or (transform_spec.categories == ["face"] and transform_spec.split_by_interactive)
+    )
+
+
 def main():
     logger.info("Initializing config objects...")
     base_config = BaseConfig()
@@ -67,30 +77,52 @@ def main():
         logger.info("Creating PC projector...")
         pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
 
-        if pca_config.use_parallel:
-            logger.info("Running PCA fits in parallel...")
-            run_joblib_parallel(
-                delayed(pc_projector.fit)(fit_spec)
-                for fit_spec in FIT_SPECS
-            )
+        # # Fit and project
+        # if pca_config.use_parallel:
+        #     logger.info("Running PCA fits in parallel...")
+        #     run_joblib_parallel(
+        #         delayed(pc_projector.fit)(fit_spec)
+        #         for fit_spec in FIT_SPECS
+        #     )
 
-            logger.info("Running PCA projections in parallel...")
-            run_joblib_parallel(
-                delayed(pc_projector.project)(fit_spec.name, transform_spec)
-                for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS)
-            )
+        #     logger.info("Running PCA projections in parallel...")
+        #     run_joblib_parallel(
+        #         delayed(pc_projector.project)(fit_spec.name, transform_spec)
+        #         for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS)
+        #     )
+        # else:
+        #     for fit_spec in FIT_SPECS:
+        #         logger.info(f"Running PCA fit: {fit_spec.name}")
+        #         pc_projector.fit(fit_spec)
 
+        #     for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
+        #         logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
+        #         pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
 
-        else:
-            for fit_spec in FIT_SPECS:
-                logger.info(f"Running PCA fit: {fit_spec.name}")
-                pc_projector.fit(fit_spec)
+        # logger.info("PCA projection script completed successfully.")
 
-            for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
-                logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
-                pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
+        # Compare trajectories
+        logger.info("\n--- Comparing category trajectories ---")
 
-        logger.info("PCA projection script completed successfully.")
+        for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
+            if not should_compare(transform_spec):
+                continue
+
+            key = f"{fit_spec.name}__{transform_spec.name}"
+            available_regions = pc_projector.get_available_fit_transform_region_keys().get(key, [])
+
+            for region in available_regions:
+                logger.info(f"\nComparing trajectories for: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")
+                try:
+                    results = pc_projector.compare_category_trajectories(fit_spec.name, transform_spec.name, region)
+                    for res in results:
+                        print(
+                            f"{res['category_1']} vs {res['category_2']} | "
+                            f"Euclidean Distance: {res['euclidean_distance']:.4f} | "
+                            f"Angle: {res['vector_angle_deg']:.2f}°"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to compare trajectories for {key} in region {region}: {e}")
 
     except Exception as e:
         logger.exception(f"PCA projection failed: {e}")
