@@ -283,7 +283,6 @@ class PCProjector:
                 row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
 
                 if row.shape[0] != 1:
-                    pdb.set_trace()
                     raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
 
                 fr = np.array(row.iloc[0]["avg_firing_rate"])
@@ -336,8 +335,6 @@ class PCProjector:
             key = (
                 meta["category"],
                 meta.get("agent"),
-                meta.get("session_name"),
-                meta.get("run_number"),
             )
             if key not in seen_keys:
                 seen_keys.add(key)
@@ -355,7 +352,7 @@ class PCProjector:
 
         # Step 4: Reshape and build final dataframe
         rows = []
-        for i, (cat, agent, session, run) in enumerate(grouped_keys):
+        for i, (cat, agent) in enumerate(grouped_keys):
             start = i * n_timepoints
             end = start + n_timepoints
             matrix = projected[start:end]  # shape: (n_timepoints, n_components)
@@ -366,8 +363,6 @@ class PCProjector:
                     "pc_dimension": dim,
                     "category": cat,
                     "agent": agent,
-                    "session": session,
-                    "run": run,
                     "pc_timeseries": matrix[:, dim].tolist(),
                 })
 

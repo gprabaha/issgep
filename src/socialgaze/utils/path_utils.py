@@ -507,7 +507,16 @@ def add_date_dir_to_path(base_path: str) -> str:
     return os.path.join(base_path, today)
 
 
+def get_pc_trajectory_comparison_plots_base_dir(config):
+    return Path(config.plots_dir) / "pc_trajectory_comparison"
 
+
+def get_pc_trajectory_comparison_plot_dir(base_dir, fit_name, dated=True):
+    """
+    Get the directory path for saving trajectory comparison plots for a given fit.
+    """
+    dir_path = os.path.join(add_date_dir_to_path(base_dir), fit_name) if dated else os.path.join(base_dir, fit_name)
+    return dir_path
 
 # ------------------------
 # == General path tools ==

@@ -1,6 +1,6 @@
 #src/socialgaze/visualization/pca_plotter.py
 
-
+import os
 import pandas as pd
 
 import matplotlib.pyplot as plt
@@ -9,6 +9,7 @@ import matplotlib.animation as animation
 from matplotlib.cm import get_cmap
 from collections import defaultdict
 
+from socialgaze.utils.path_utils import get_pc_trajectory_comparison_plot_dir
 
 
 class PCAPlotter:
@@ -140,5 +141,87 @@ class PCAPlotter:
         ani.save(save_path, fps=24, dpi=self.plotting_config.plot_dpi)
         plt.close(fig)
         return save_path
+
+
+    def plot_pc_trajectory_comparisons(self, comparison_data: dict, fit_name: str, regions: list):
+        """
+        Generates comparison plots for a given fit, across all transforms and regions.
+        Each region gets one figure with:
+            - One row per transform
+            - Columns: 3D trajectory plot + bar plots for comparison metrics
+        """
+
+        save_base = get_pc_trajectory_comparison_plot_dir(
+            base_dir=self.pca_config.pc_trajectory_comparison_plots_base_dir,
+            fit_name=fit_name,
+            dated=True
+        )
+        os.makedirs(save_base, exist_ok=True)
+
+        metric_names = ["euclidean_distance", "vector_angle_deg", "trajectory_length_diff", "procrustes_disparity"]
+        n_metrics = len(metric_names)
+        transform_names = sorted(comparison_data.keys())
+        n_cols = 1 + n_metrics
+
+        for region in regions:
+            fig, axes = [], []
+
+            # Create mixed 3D + 2D subplot grid manually
+            fig = plt.figure(figsize=(self.plotting_config.plot_size[0]*n_cols, self.plotting_config.plot_size[1]*len(transform_names)))
+            axes = []
+            for row_idx in range(len(transform_names)):
+                row_axes = []
+                for col_idx in range(n_cols):
+                    if col_idx == 0:
+                        ax = fig.add_subplot(len(transform_names), n_cols, row_idx * n_cols + col_idx + 1, projection="3d")
+                    else:
+                        ax = fig.add_subplot(len(transform_names), n_cols, row_idx * n_cols + col_idx + 1)
+                    row_axes.append(ax)
+                axes.append(row_axes)
+
+            for row_idx, transform_name in enumerate(transform_names):
+                transform_data = comparison_data[transform_name].get(region)
+                if transform_data is None:
+                    continue
+
+                # --- 3D trajectory plot ---
+                ax = axes[row_idx][0]
+                proj_df = transform_data["projection_df"]
+
+                grouped = defaultdict(list)
+                for _, row in proj_df.iterrows():
+                    key = row["category"]
+                    grouped[key].append(row)
+
+                cmap = get_cmap("tab10")
+                color_map = {cat: cmap(i % 10) for i, cat in enumerate(sorted(grouped.keys()))}
+
+                for cat, rows in grouped.items():
+                    color = color_map[cat]
+                    pc1 = next(row for row in rows if row["pc_dimension"] == 0)["pc_timeseries"]
+                    pc2 = next(row for row in rows if row["pc_dimension"] == 1)["pc_timeseries"]
+                    pc3 = next(row for row in rows if row["pc_dimension"] == 2)["pc_timeseries"]
+                    ax.plot(pc1, pc2, pc3, color=color, alpha=0.6, label=cat)
+
+                ax.set_title(f"{transform_name} | {region}")
+                ax.set_xlabel("PC1")
+                ax.set_ylabel("PC2")
+                ax.set_zlabel("PC3")
+                ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
+
+                # --- Metric bar plots ---
+                comparison_metrics = transform_data["comparison_metrics"]
+                for col_idx, metric_name in enumerate(metric_names, start=1):
+                    ax_metric = axes[row_idx][col_idx]
+                    labels = [f"{m['category_1']} vs {m['category_2']}" for m in comparison_metrics]
+                    values = [m[metric_name] for m in comparison_metrics]
+                    ax_metric.bar(range(len(values)), values, tick_label=labels)
+                    ax_metric.set_title(metric_name.replace("_", " ").title())
+                    ax_metric.tick_params(axis='x', labelrotation=45)
+
+            fig.tight_layout()
+            save_path = os.path.join(save_base, f"{region}_comparison.png")
+            fig.savefig(save_path, dpi=self.plotting_config.plot_dpi)
+            plt.close(fig)
 
 

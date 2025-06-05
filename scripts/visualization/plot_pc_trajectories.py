@@ -13,7 +13,8 @@ Run:
 """
 
 import logging
-import pdb
+from itertools import product
+from collections import defaultdict
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
@@ -67,30 +68,61 @@ def main():
     projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
     plotter = PCAPlotter(plotting_config=plotting_config, pca_config=pca_config)
 
-    available_keys = projector.get_available_fit_transform_region_keys()
+    # available_keys = projector.get_available_fit_transform_region_keys()
+    
+    # for (fit_spec, transform_spec) in [(f, t) for f in FIT_SPECS for t in TRANSFORM_SPECS]:
+    #     key = f"{fit_spec.name}__{transform_spec.name}"
+    #     if key not in available_keys:
+    #         continue
+    #     for region in available_keys[key]:
+    #         try:
+    #             logger.info(f"Plotting: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")                
+    #             df, _ = projector.get_projection(fit_spec.name, transform_spec.name, region)
+    #             save_path_static = plotter.plot_pc_trajectories_all_trials(df, fit_spec.name, transform_spec.name, region)
+    #             logger.info(f"Saved static 3D plot to: {save_path_static}")
 
-    # Define allowed spec names
+    #             save_path_rot = plotter.animate_pc_trajectories_3d(df, fit_spec.name, transform_spec.name, region)
+    #             logger.info(f"Saved rotating 3D plot to: {save_path_rot}")
+
+    #         except Exception as e:
+    #             logger.warning(f"Plotting failed for {key} in {region}: {e}")
+
+    # logger.info("PC projection plotting completed.")
+
+
+    # === Comparison summary plots (only for selected fits + transforms) ===
     allowed_fits = {"fit_avg_face_obj", "fit_int_non_int_face_obj"}
     allowed_transforms = {"transform_avg_face_obj", "transform_int_non_int_face_obj"}
-    
-    for (fit_spec, transform_spec) in [(f, t) for f in FIT_SPECS for t in TRANSFORM_SPECS]:
-        key = f"{fit_spec.name}__{transform_spec.name}"
-        if key not in available_keys:
+
+    for fit_spec in FIT_SPECS:
+        if fit_spec.name not in allowed_fits:
             continue
-        for region in available_keys[key]:
-            try:
-                logger.info(f"Plotting: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")                
-                df, _ = projector.get_projection(fit_spec.name, transform_spec.name, region)
-                save_path_static = plotter.plot_pc_trajectories_all_trials(df, fit_spec.name, transform_spec.name, region)
-                logger.info(f"Saved static 3D plot to: {save_path_static}")
 
-                save_path_rot = plotter.animate_pc_trajectories_3d(df, fit_spec.name, transform_spec.name, region)
-                logger.info(f"Saved rotating 3D plot to: {save_path_rot}")
+        logger.info(f"\n[COMPARISON] Preparing plots for fit: {fit_spec.name}")
+        comparison_dict = defaultdict(dict)
+        region_set = set()
 
-            except Exception as e:
-                logger.warning(f"Plotting failed for {key} in {region}: {e}")
+        for transform_spec in TRANSFORM_SPECS:
+            if transform_spec.name not in allowed_transforms:
+                continue
 
-    logger.info("PC projection plotting completed.")
+            key = f"{fit_spec.name}__{transform_spec.name}"
+            available_regions = projector.get_available_fit_transform_region_keys().get(key, [])
+            for region in available_regions:
+                try:
+                    df, _ = projector.get_projection(fit_spec.name, transform_spec.name, region)
+                    results = projector.compare_category_trajectories(fit_spec.name, transform_spec.name, region)
+                    comparison_dict[transform_spec.name][region] = {
+                        "projection_df": df,
+                        "comparison_metrics": results
+                    }
+                    region_set.add(region)
+                except Exception as e:
+                    logger.warning(f"Comparison failed for {key} in {region}: {e}")
+
+        if comparison_dict:
+            plotter.plot_pc_trajectory_comparisons(comparison_dict, fit_spec.name, sorted(region_set))
+
 
 
 if __name__ == "__main__":

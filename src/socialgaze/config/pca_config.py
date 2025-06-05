@@ -6,7 +6,8 @@ from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.path_utils import (
     get_pc_model_basedir,
     get_pc_trajectory_plots_base_dir,
-    get_pc_trajectory_plot_dir_for_fit_transform_combination
+    get_pc_trajectory_plot_dir_for_fit_transform_combination,
+    get_pc_trajectory_comparison_plots_base_dir
 )
 
 
@@ -27,6 +28,8 @@ class PCAConfig(BaseConfig):
         # === Paths to save fits and projections ===
         self.pc_projection_base_dir = get_pc_model_basedir(self)
         self.pc_trajectory_plot_base_dir = get_pc_trajectory_plots_base_dir(self)
+        self.pc_trajectory_comparison_plots_base_dir = get_pc_trajectory_comparison_plots_base_dir(self)
+        
 
 
     def get_static_pc_plot_path(self, fit_name: str, transform_name: str, region: str, plot_file_format: str, include_date: bool = True) -> str:

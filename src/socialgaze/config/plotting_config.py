@@ -1,3 +1,4 @@
+# src/socialgaze/config/plotting_config.py
 
 from socialgaze.config.base_config import BaseConfig
 
@@ -7,4 +8,3 @@ class PlottingConfig(BaseConfig):
         self.plot_file_format = "png"
         self.plot_size = (8, 6)
         self.plot_dpi = 100
-        self.include_date = True
