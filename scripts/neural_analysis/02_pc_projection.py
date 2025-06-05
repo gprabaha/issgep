@@ -68,29 +68,29 @@ def main():
         logger.info("Creating PC projector...")
         pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
 
-        # # Fit and project
-        # if pca_config.use_parallel:
-        #     logger.info("Running PCA fits in parallel...")
-        #     run_joblib_parallel(
-        #         delayed(pc_projector.fit)(fit_spec)
-        #         for fit_spec in FIT_SPECS
-        #     )
+        # Fit and project
+        if pca_config.use_parallel:
+            logger.info("Running PCA fits in parallel...")
+            run_joblib_parallel(
+                delayed(pc_projector.fit)(fit_spec)
+                for fit_spec in FIT_SPECS
+            )
 
-        #     logger.info("Running PCA projections in parallel...")
-        #     run_joblib_parallel(
-        #         delayed(pc_projector.project)(fit_spec.name, transform_spec)
-        #         for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS)
-        #     )
-        # else:
-        #     for fit_spec in FIT_SPECS:
-        #         logger.info(f"Running PCA fit: {fit_spec.name}")
-        #         pc_projector.fit(fit_spec)
+            logger.info("Running PCA projections in parallel...")
+            run_joblib_parallel(
+                delayed(pc_projector.project)(fit_spec.name, transform_spec)
+                for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS)
+            )
+        else:
+            for fit_spec in FIT_SPECS:
+                logger.info(f"Running PCA fit: {fit_spec.name}")
+                pc_projector.fit(fit_spec)
 
-        #     for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
-        #         logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
-        #         pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
+            for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
+                logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
+                pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
 
-        # logger.info("PCA projection script completed successfully.")
+        logger.info("PCA projection script completed successfully.")
 
         # Compare trajectories
         logger.info("\n--- Comparing category trajectories ---")

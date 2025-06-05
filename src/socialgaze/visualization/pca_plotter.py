@@ -1,4 +1,4 @@
-#src/socialgaze/visualization/plot_3d.py
+#src/socialgaze/visualization/pca_plotter.py
 
 
 import os
@@ -14,7 +14,7 @@ from collections import defaultdict
 from socialgaze.utils.path_utils import get_pc_plot_path, add_date_dir_to_path
 
 
-class ThreeDPlotter:
+class PCAPlotter:
     def __init__(self, config):
         self.config = config
 

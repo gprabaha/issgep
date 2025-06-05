@@ -403,6 +403,9 @@ class PCProjector:
 
 
 def mean_vector_angle(h1: np.ndarray, h2: np.ndarray) -> float:
+
+    # !! Try mean shifting the trajectories to find the angles between them
+
     """
     Compute the mean angle (in radians) between corresponding vectors in h1 and h2.
 

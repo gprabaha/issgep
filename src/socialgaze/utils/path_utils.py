@@ -418,7 +418,7 @@ def get_fixation_probability_plot_dir(config) -> str:
 # ---------------------------------
 
 def get_pc_model_basedir(config):
-    return Path(config.processed_data_dir) / "pc_projection"
+    return Path(config.output_dir) / "pc_projection"
 
 def get_pc_fit_model_path(base_dir: str, fit_name: str, region: str) -> Path:
     """

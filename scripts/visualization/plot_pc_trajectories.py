@@ -28,7 +28,7 @@ from socialgaze.features.fixation_detector import FixationDetector
 from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.features.psth_extractor import PSTHExtractor
 from socialgaze.features.pc_projector import PCProjector
-from socialgaze.visualization.plot_3d import ThreeDPlotter
+from socialgaze.visualization.pca_plotter import PCAPlotter
 
 from socialgaze.specs.pca_specs import FIT_SPECS, TRANSFORM_SPECS
 
@@ -65,10 +65,14 @@ def main():
 
     logger.info("Creating PC projector and 3D plotter...")
     projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
-    plotter = ThreeDPlotter(config=plotting_config)
+    plotter = PCAPlotter(config=plotting_config)
 
     available_keys = projector.get_available_fit_transform_region_keys()
-
+    
+    # Define allowed spec names
+    allowed_fits = {"fit_avg_face_obj", "fit_int_non_int_face_obj"}
+    allowed_transforms = {"transform_avg_face_obj", "transform_int_non_int_face_obj"}
+    
     for (fit_spec, transform_spec) in [(f, t) for f in FIT_SPECS for t in TRANSFORM_SPECS]:
         key = f"{fit_spec.name}__{transform_spec.name}"
         if key not in available_keys:
