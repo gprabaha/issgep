@@ -1,7 +1,6 @@
 #src/socialgaze/visualization/pca_plotter.py
 
 
-import os
 import pandas as pd
 
 import matplotlib.pyplot as plt
@@ -11,12 +10,11 @@ from matplotlib.cm import get_cmap
 from collections import defaultdict
 
 
-from socialgaze.utils.path_utils import get_pc_plot_path, add_date_dir_to_path
-
 
 class PCAPlotter:
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, plotting_config, pca_config):
+        self.plotting_config = plotting_config
+        self.pca_config = pca_config
 
 
     def plot_pc_trajectories_all_trials(self, proj_df, fit_name: str, transform_name: str, region: str):
@@ -44,7 +42,7 @@ class PCAPlotter:
             label_flags[key] = False
 
         # Plot
-        fig = plt.figure(figsize=self.config.plot_size, dpi=self.config.plot_dpi)
+        fig = plt.figure(figsize=self.plotting_config.plot_size, dpi=self.plotting_config.plot_dpi)
         ax = fig.add_subplot(111, projection="3d")
 
         for (cat, inter, trial), rows in grouped.items():
@@ -66,8 +64,8 @@ class PCAPlotter:
         ax.legend(loc="upper left", bbox_to_anchor=(1, 1))
         fig.tight_layout()
         
-        save_path = self.config.get_static_plot_path(fit_name, transform_name, region)
-        fig.savefig(save_path, dpi=self.config.plot_dpi)
+        save_path = self.pca_config.get_static_pc_plot_path(fit_name, transform_name, region, self.plotting_config.plot_file_format)
+        fig.savefig(save_path, dpi=self.plotting_config.plot_dpi)
         plt.close(fig)
         return save_path
 
@@ -108,7 +106,7 @@ class PCAPlotter:
             color_map[key] = cmap(i % 10)
 
         # === Create figure
-        fig = plt.figure(figsize=self.config.plot_size, dpi=self.config.plot_dpi)
+        fig = plt.figure(figsize=self.plotting_config.plot_size, dpi=self.plotting_config.plot_dpi)
         ax = fig.add_subplot(111, projection="3d")
         lines = []
 
@@ -138,20 +136,9 @@ class PCAPlotter:
             blit=False
         )
 
-        save_path = self.config.get_rotation_plot_path(fit_name, transform_name, region)
-        ani.save(save_path, fps=24, dpi=self.config.plot_dpi)
+        save_path = self.pca_config.get_rotation_pc_plot_path(fit_name, transform_name, region)
+        ani.save(save_path, fps=24, dpi=self.plotting_config.plot_dpi)
         plt.close(fig)
         return save_path
 
 
-
-    def _build_save_path(self, fit_name, transform_name, region, suffix: str, ext: str = None):
-        ext = ext or self.config.plot_file_format
-        base_dir = get_pc_plot_path(
-            self.config.pc_plot_base_dir,
-            fit_name,
-            transform_name,
-            dated=self.config.include_date,
-        )
-        fname = f"{suffix}_{region}.{ext}"
-        return os.path.join(base_dir, fname)

@@ -65,10 +65,10 @@ def main():
 
     logger.info("Creating PC projector and 3D plotter...")
     projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
-    plotter = PCAPlotter(config=plotting_config)
+    plotter = PCAPlotter(plotting_config=plotting_config, pca_config=pca_config)
 
     available_keys = projector.get_available_fit_transform_region_keys()
-    
+
     # Define allowed spec names
     allowed_fits = {"fit_avg_face_obj", "fit_int_non_int_face_obj"}
     allowed_transforms = {"transform_avg_face_obj", "transform_int_non_int_face_obj"}

@@ -481,6 +481,18 @@ def get_pc_projection_meta_path(base_dir: str, fit_name: str, transform_name: st
     return Path(base_dir) / f"{fit_name}__{transform_name}" / "meta.pkl"
 
 
+def get_pc_trajectory_plots_base_dir(config):
+    return Path(config.plots_dir) / "pc_trajectories"
+
+
+def get_pc_trajectory_plot_dir_for_fit_transform_combination(base_dir, fit_name, transform_name, dated=True):
+    if dated:
+        base_dir = add_date_dir_to_path(base_dir)
+    dir_path = os.path.join(base_dir, fit_name, transform_name)
+    os.makedirs(dir_path, exist_ok=True)
+    return dir_path
+
+
 def add_date_dir_to_path(base_path: str) -> str:
     """
     Appends today's date (YYYY-MM-DD) as a subdirectory to the given path.
@@ -494,13 +506,6 @@ def add_date_dir_to_path(base_path: str) -> str:
     today = date.today().isoformat()
     return os.path.join(base_path, today)
 
-
-def get_pc_plot_path(base_dir, fit_name, transform_name, dated=True):
-    if dated:
-        base_dir = add_date_dir_to_path(base_dir)
-    path = os.path.join(base_dir, fit_name, transform_name)
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 
