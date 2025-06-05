@@ -38,7 +38,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
-outputs/plots/*
-!outputs/plots/.gitkeep
+outputs/*
+!outputs/.gitkeep
 jobs/logs/*
 !jobs/logs/.gitkeep
