@@ -71,7 +71,6 @@ class PCAPlotter:
         return save_path
 
 
-
     def animate_pc_trajectories_3d(
         self,
         proj_df: pd.DataFrame,

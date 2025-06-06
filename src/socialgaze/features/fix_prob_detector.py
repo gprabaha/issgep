@@ -251,3 +251,110 @@ class FixProbDetector:
         if prev_end <= max_val - 1:
             result.append((prev_end, max_val - 1))
         return result
+
+
+import numpy as np
+from statsmodels.tsa.stattools import acf
+from scipy.stats import norm
+from sklearn.mixture import GaussianMixture
+from hmmlearn import hmm
+from tqdm import tqdm
+
+def estimate_probabilities_and_errors(a: np.ndarray, b: np.ndarray):
+    """Estimate P(A), P(B), P(AB) with standard errors accounting for autocorrelation and cross-correlation."""
+    assert len(a) == len(b)
+    N = len(a)
+    a = a.astype(bool)
+    b = b.astype(bool)
+    ab = a & b
+
+    # Means
+    p_a = np.mean(a)
+    p_b = np.mean(b)
+    p_ab = np.mean(ab)
+
+    # Lag-1 autocorrelations
+    r_a = acf(a, nlags=1, fft=False)[1]
+    r_b = acf(b, nlags=1, fft=False)[1]
+    r_ab = acf(ab, nlags=1, fft=False)[1]
+
+    # Effective sample sizes
+    N_eff_a = N * (1 - r_a) / (1 + r_a)
+    N_eff_b = N * (1 - r_b) / (1 + r_b)
+    N_eff_ab = N * (1 - r_ab) / (1 + r_ab)
+
+    # Bound check
+    N_eff_a = max(1, N_eff_a)
+    N_eff_b = max(1, N_eff_b)
+    N_eff_ab = max(1, N_eff_ab)
+
+    # Standard errors
+    se_a = np.sqrt(p_a * (1 - p_a) / N_eff_a)
+    se_b = np.sqrt(p_b * (1 - p_b) / N_eff_b)
+    se_ab = np.sqrt(p_ab * (1 - p_ab) / N_eff_ab)
+
+    return {
+        "P(A)": (p_a, se_a),
+        "P(B)": (p_b, se_b),
+        "P(AB)": (p_ab, se_ab)
+    }
+
+def permutation_test_pab(a, b, n_permutations=1000):
+    """Permutation test comparing P(AB) to expected P(A)*P(B)"""
+    a = a.astype(bool)
+    b = b.astype(bool)
+    observed_pab = np.mean(a & b)
+    pab_shuffled = []
+
+    for _ in range(n_permutations):
+        b_shifted = np.roll(b, np.random.randint(1, len(b)))
+        pab_shuffled.append(np.mean(a & b_shifted))
+
+    pab_shuffled = np.array(pab_shuffled)
+    p_value = np.mean(pab_shuffled >= observed_pab)
+
+    return observed_pab, pab_shuffled, p_value
+
+def sliding_window_dependence(a, b, window_size=1000, step_size=100):
+    """Sliding window estimation of P(A), P(B), P(AB), and independence deviation."""
+    assert len(a) == len(b)
+    indices = range(0, len(a) - window_size + 1, step_size)
+    results = []
+
+    for start in indices:
+        end = start + window_size
+        aw = a[start:end]
+        bw = b[start:end]
+
+        p_a = np.mean(aw)
+        p_b = np.mean(bw)
+        p_ab = np.mean(aw & bw)
+        delta = p_ab - (p_a * p_b)
+
+        results.append((start, p_a, p_b, p_ab, delta))
+
+    return np.array(results)
+
+def gmm_on_dependence_deltas(delta_array, n_components=2):
+    """Fit GMM to deltas to cluster states of dependence"""
+    delta_array = delta_array.reshape(-1, 1)
+    gmm = GaussianMixture(n_components=n_components, random_state=0)
+    gmm.fit(delta_array)
+    labels = gmm.predict(delta_array)
+    return gmm, labels
+
+def fit_hmm_to_joint_state(a, b, n_states=2):
+    """Fit a discrete HMM to the joint state of A and B"""
+    joint_states = (a.astype(int) << 1) | b.astype(int)  # 2-bit state: 00, 01, 10, 11 -> 0, 1, 2, 3
+    model = hmm.MultinomialHMM(n_components=n_states, n_iter=100, random_state=0)
+    model.fit(joint_states.reshape(-1, 1))
+    state_sequence = model.predict(joint_states.reshape(-1, 1))
+    return model, state_sequence
+
+# Example usage (a and b must be defined as binary arrays of same length)
+# a, b = <binary numpy arrays>
+# results = estimate_probabilities_and_errors(a, b)
+# observed_pab, pab_shuffled, p_val = permutation_test_pab(a, b)
+# sliding_results = sliding_window_dependence(a, b)
+# gmm, gmm_labels = gmm_on_dependence_deltas(sliding_results[:, 4])
+# hmm_model, hmm_states = fit_hmm_to_joint_state(a, b)
