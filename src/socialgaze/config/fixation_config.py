@@ -29,7 +29,7 @@ class FixationConfig(BaseConfig):
         # === Behavior flags ===
         self.test_single_run = False
         self.detect_fixations_again = False
-        self.update_labes_in_dfs = True
+        self.update_labes_in_dfs = False
         self.fixation_labeling_log_interval = 100
 
         # === HPC job config ===

@@ -119,19 +119,21 @@ class FixationDetector:
     def load_dataframes(self, behavior_type: Optional[str] = None):
         """
         Loads fixation and/or saccade DataFrames from their configured paths.
-        Raises error if the file is missing.
+        Logs a warning if the file is missing but does not raise an error.
         """
         if behavior_type == "fixations" or behavior_type is None:
             if self.config.fixation_df_path.exists():
                 self.fixations = load_df_from_pkl(self.config.fixation_df_path)
             else:
-                raise FileNotFoundError(f"Missing {self.config.fixation_df_path}")
+                logger.warning(f"Fixation DataFrame not found at: {self.config.fixation_df_path}")
+                self.fixations = None
 
         if behavior_type == "saccades" or behavior_type is None:
             if self.config.saccade_df_path.exists():
                 self.saccades = load_df_from_pkl(self.config.saccade_df_path)
             else:
-                raise FileNotFoundError(f"Missing {self.config.saccade_df_path}")
+                logger.warning(f"Saccade DataFrame not found at: {self.config.saccade_df_path}")
+                self.saccades = None
 
 
     def get_behavior_data(self, behavior_type: str, session_name=None, run_number=None, agent=None) -> pd.DataFrame:
