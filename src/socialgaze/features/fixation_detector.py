@@ -263,87 +263,21 @@ class FixationDetector:
             if behavior_type is not None
             else self.config.binary_vector_types_to_generate
         )
-
         last_df = None
         for btype in behavior_types:
             logger.info(f"\n ** Generating binary vectors for behavior: {btype}")
-            is_fixation = btype.endswith("_fixation")
-            is_saccade = btype.startswith("saccade_")
+            result_df = self._generate_binary_vector_df_for_behavior(btype)
 
-            # --- Load data ---
-            if is_fixation:
-                if self.fixations is None or self.fixations.empty:
-                    logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
-                    self.load_dataframes("fixations")
-                if self.fixations is None or self.fixations.empty:
-                    logger.warning("No fixation data found — skipping %s", btype)
-                    continue
-                if "category" not in self.fixations.columns:
-                    self.add_fixation_category_column()
-                df = self.fixations.copy()
-                filter_column = "category"
-
-            elif is_saccade:
-                if self.saccades is None or self.saccades.empty:
-                    logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
-                    self.load_dataframes("saccades")
-                if self.saccades is None or self.saccades.empty:
-                    logger.warning("No saccade data found — skipping %s", btype)
-                    continue
-                df = self.saccades.copy()
-                if not {"from", "to", "start", "stop"}.issubset(df.columns):
-                    logger.error("Saccade dataframe missing required columns — skipping %s", btype)
-                    continue
-                filter_column = "from" if "from" in btype else "to"
-
-            else:
-                logger.error("Unrecognized behavior_type: %s", btype)
-                continue
-
-            # --- Filter category ---
-            category_key = btype.replace("_fixation", "").replace("saccade_from_", "").replace("saccade_to_", "")
-            df = df[df[filter_column] == category_key]
-            if df.empty:
-                logger.warning("No events found for %s — skipping", btype)
-                continue
-
-            run_lengths_df = self.gaze_data.get_data("run_lengths")
-            vectors = []
-
-            grouped = df.groupby(["session_name", "run_number", "agent"])
-            for (session, run, agent), group in grouped:
-                run_len_match = run_lengths_df.query("session_name == @session and run_number == @run")
-                if run_len_match.empty:
-                    logger.warning("Run length missing for %s-%s-%s — skipping", session, run, agent)
-                    continue
-                run_length = int(run_len_match["run_length"].values[0])
-                binary_vector = np.zeros(run_length, dtype=int)
-                for _, row in group.iterrows():
-                    binary_vector[row["start"]:row["stop"] + 1] = 1
-
-                vectors.append({
-                    "session_name": session,
-                    "run_number": run,
-                    "agent": agent,
-                    "behavior_type": btype,
-                    "binary_vector": binary_vector
-                })
-
-            result_df = pd.DataFrame(vectors)
-            out_path = get_behav_binary_vector_path(self.config, btype)
-
-            if result_df.empty:
+            if result_df is None or result_df.empty:
                 logger.warning(f"{btype} binary vector dataframe is empty — skipping save.")
-            else:
-                save_df_to_pkl(result_df, out_path)
-                self.binary_vector_paths[btype] = out_path
-                logger.info("Saved %s binary vectors to %s", btype, out_path)
-
+                continue
+            out_path = get_behav_binary_vector_path(self.config, btype)
+            save_df_to_pkl(result_df, out_path)
+            self.binary_vector_paths[btype] = out_path
+            logger.info("Saved %s binary vectors to %s", btype, out_path)
             last_df = result_df
-
         if return_df:
             return last_df
-
 
     def get_binary_vector_df(self, behavior_type: str) -> pd.DataFrame:
         """
@@ -353,45 +287,6 @@ class FixationDetector:
         if path is None or not path.exists():
             raise FileNotFoundError(f"Binary vector file for {behavior_type} not found at: {path}")
         return load_df_from_pkl(path)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
     # -------------------
@@ -406,24 +301,19 @@ class FixationDetector:
         fix_dfs, sacc_dfs = [], []
         temp_dir = self.config.temp_dir
         logger.info("Loading fixation and saccade dfs exported from array jobs")
-
         for session, run, agent in tasks:
             fix_path = get_fixation_job_result_path(temp_dir, session, run, agent)
             sacc_path = get_saccade_job_result_path(temp_dir, session, run, agent)
-
             if fix_path.exists():
                 fix_dfs.append(load_df_from_pkl(fix_path))
             else:
                 logger.warning("Missing fixation file: %s", fix_path)
-
             if sacc_path.exists():
                 sacc_dfs.append(load_df_from_pkl(sacc_path))
             else:
                 logger.warning("Missing saccade file: %s", sacc_path)
-
         self.fixations = pd.concat(fix_dfs, ignore_index=True) if fix_dfs else pd.DataFrame()
         self.saccades = pd.concat(sacc_dfs, ignore_index=True) if sacc_dfs else pd.DataFrame()
-
         # Clean up temp folder
         if temp_dir.exists():
             try:
@@ -431,7 +321,6 @@ class FixationDetector:
                 logger.info(f"Deleted temporary folder: {temp_dir}")
             except Exception as e:
                 logger.warning(f"Failed to delete temp directory {temp_dir}: {e}")
-
 
 
     def _apply_updates_to_df(df: pd.DataFrame, grouped_results: List[List[tuple]], colname: Union[str, List[str]]) -> pd.DataFrame:
@@ -464,7 +353,6 @@ class FixationDetector:
 
     def _align_fixation_saccade_pair_for_key(self, key, fixation_groups, saccade_groups) -> bool:
         session_name, run_number, agent = key
-
         fix_group = fixation_groups.get_group(key).copy()
         sacc_group = saccade_groups.get_group(key).copy()
 
@@ -481,21 +369,16 @@ class FixationDetector:
         sacc_indices = sacc_group.index.tolist()
 
         events = _merge_and_sort_gaze_events(fix_starts, fix_stops, sacc_starts, sacc_stops, fix_indices, sacc_indices)
-
         new_fix_locs, new_sacc_froms, new_sacc_tos, changes_made = self._correct_event_label_mismatches(
             session_name, run_number, agent, events, fix_locs, sacc_froms, sacc_tos
         )
-
         # Write back updates by index
         for idx, val in zip(fix_indices, new_fix_locs):
             self.fixations.at[idx, "location"] = val
-
         for idx, val_from, val_to in zip(sacc_indices, new_sacc_froms, new_sacc_tos):
             self.saccades.at[idx, "from"] = val_from
             self.saccades.at[idx, "to"] = val_to
-
         return changes_made
-
 
 
     def _correct_event_label_mismatches(self, session_name, run_number, agent, events,
@@ -533,6 +416,75 @@ class FixationDetector:
         return fixation_locs, saccade_froms, saccade_tos, changes_made
 
 
+    # == Binary vector generation helpers == #
+
+
+    def _generate_binary_vector_df_for_behavior(self, behavior_type: str) -> Optional[pd.DataFrame]:
+        df, filter_column = self._get_filtered_behavior_dataframe(behavior_type)
+        if df is None or df.empty:
+            return None
+
+        category_key = behavior_type.replace("_fixation", "").replace("saccade_from_", "").replace("saccade_to_", "")
+        df = df[df[filter_column] == category_key]
+        if df.empty:
+            logger.warning("No events found for %s — skipping", behavior_type)
+            return None
+
+        return self._build_binary_vector_dataframe(df, category_key=behavior_type)
+
+    def _get_filtered_behavior_dataframe(self, behavior_type: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+        is_fixation = behavior_type.endswith("_fixation")
+        is_saccade = behavior_type.startswith("saccade_")
+
+        if is_fixation:
+            if self.fixations is None or self.fixations.empty:
+                logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
+                self.load_dataframes("fixations")
+            if self.fixations is None or self.fixations.empty:
+                logger.warning("No fixation data found — skipping %s", behavior_type)
+                return None, None
+            if "category" not in self.fixations.columns:
+                self.add_fixation_category_column()
+            return self.fixations.copy(), "category"
+
+        elif is_saccade:
+            if self.saccades is None or self.saccades.empty:
+                logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
+                self.load_dataframes("saccades")
+            if self.saccades is None or self.saccades.empty:
+                logger.warning("No saccade data found — skipping %s", behavior_type)
+                return None, None
+            if not {"from", "to", "start", "stop"}.issubset(self.saccades.columns):
+                logger.error("Saccade dataframe missing required columns — skipping %s", behavior_type)
+                return None, None
+            filter_column = "from" if "from" in behavior_type else "to"
+            return self.saccades.copy(), filter_column
+
+        else:
+            logger.error("Unrecognized behavior_type: %s", behavior_type)
+            return None, None
+
+    def _build_binary_vector_dataframe(self, df: pd.DataFrame, category_key: str) -> pd.DataFrame:
+        run_lengths_df = self.gaze_data.get_data("run_lengths")
+        vectors = []
+        grouped = df.groupby(["session_name", "run_number", "agent"])
+        for (session, run, agent), group in grouped:
+            run_len_match = run_lengths_df.query("session_name == @session and run_number == @run")
+            if run_len_match.empty:
+                logger.warning("Run length missing for %s-%s-%s — skipping", session, run, agent)
+                continue
+            run_length = int(run_len_match["run_length"].values[0])
+            binary_vector = np.zeros(run_length, dtype=int)
+            for _, row in group.iterrows():
+                binary_vector[row["start"]:row["stop"] + 1] = 1
+            vectors.append({
+                "session_name": session,
+                "run_number": run,
+                "agent": agent,
+                "behavior_type": category_key,
+                "binary_vector": binary_vector
+            })
+        return pd.DataFrame(vectors)
 
 
 # Fixation and saccade detection functions
