@@ -22,7 +22,11 @@ from socialgaze.utils.hpc_utils import (
     submit_dsq_array_job,
     track_job_completion
 )
-from socialgaze.utils.path_utils import get_fixation_job_result_path, get_saccade_job_result_path
+from socialgaze.utils.path_utils import (
+    get_fixation_job_result_path,
+    get_saccade_job_result_path,
+    get_behav_binary_vector_path
+)
 from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.utils.saving_utils import save_df_to_pkl
 
@@ -34,7 +38,7 @@ class FixationDetector:
         self.config = config
         self.fixations: Optional[pd.DataFrame] = None
         self.saccades: Optional[pd.DataFrame] = None
-        self.fixation_binary_vectors: Optional[pd.DataFrame] = None
+        self.binary_vector_paths: dict = {}
 
     def detect_fixations_through_hpc_jobs(self):
         logger.info("\n ** Generating fixation and saccade detection jobs...")
@@ -245,150 +249,150 @@ class FixationDetector:
         self.fixations["category"] = self.fixations["location"].apply(_categorize_fixations)
 
 
-    def generate_fixation_binary_vectors(self, return_df: bool = False) -> Optional[pd.DataFrame]:
+    def generate_and_save_binary_vectors(
+        self,
+        behavior_type: Optional[str] = None,
+        return_df: bool = False
+    ) -> Optional[pd.DataFrame]:
         """
-        Generates binary vectors for each fixation category per run and agent.
-        Stores the result in self.fixation_binary_vectors and optionally returns it.
-
-        Args:
-            return_df (bool): If True, returns the binary vector DataFrame.
-        Returns:
-            Optional[pd.DataFrame]: Long-format DataFrame of binary vectors (if return_df=True).
+        Generates and saves binary vectors for a specific behavior_type, or all if behavior_type is None.
+        Stores only the path to each result in self.binary_vector_paths (not the data itself).
         """
-        logger.info("\n ** Generating fixation binary vectors...")
+        behavior_types = (
+            [behavior_type]
+            if behavior_type is not None
+            else self.config.binary_vector_types_to_generate
+        )
 
-        if self.fixations is None or self.fixations.empty:
-            logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
-            self.load_dataframes("fixations")
+        last_df = None
+        for btype in behavior_types:
+            logger.info(f"\n ** Generating binary vectors for behavior: {btype}")
+            is_fixation = btype.endswith("_fixation")
+            is_saccade = btype.startswith("saccade_")
 
-        if "category" not in self.fixations.columns:
-            logger.info("'category' column not found in fixations. Running add_fixation_category_column().")
-            self.add_fixation_category_column()
+            # --- Load data ---
+            if is_fixation:
+                if self.fixations is None or self.fixations.empty:
+                    logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
+                    self.load_dataframes("fixations")
+                if self.fixations is None or self.fixations.empty:
+                    logger.warning("No fixation data found — skipping %s", btype)
+                    continue
+                if "category" not in self.fixations.columns:
+                    self.add_fixation_category_column()
+                df = self.fixations.copy()
+                filter_column = "category"
 
-        run_lengths_df = self.gaze_data.get_data('run_lengths')
-        vectors = []
+            elif is_saccade:
+                if self.saccades is None or self.saccades.empty:
+                    logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
+                    self.load_dataframes("saccades")
+                if self.saccades is None or self.saccades.empty:
+                    logger.warning("No saccade data found — skipping %s", btype)
+                    continue
+                df = self.saccades.copy()
+                if not {"from", "to", "start", "stop"}.issubset(df.columns):
+                    logger.error("Saccade dataframe missing required columns — skipping %s", btype)
+                    continue
+                filter_column = "from" if "from" in btype else "to"
 
-        grouped = self.fixations.groupby(["session_name", "run_number", "agent"])
-        for (session, run, agent), group in grouped:
-            run_len_match = run_lengths_df.query("session_name == @session and run_number == @run")
-            if run_len_match.empty:
-                logger.warning("Run length missing for %s-%s-%s — skipping", session, run, agent)
+            else:
+                logger.error("Unrecognized behavior_type: %s", btype)
                 continue
-            run_length = int(run_len_match["run_length"].values[0])
 
-            binary_dict = defaultdict(lambda: np.zeros(run_length, dtype=int))
-
-            for _, row in group.iterrows():
-                start, stop = row["start"], row["stop"]
-                category = row["category"]
-                binary_dict[category][start:stop + 1] = 1
-
-            for cat, vec in binary_dict.items():
-                vectors.append({
-                    "session_name": session,
-                    "run_number": run,
-                    "agent": agent,
-                    "fixation_type": cat,
-                    "binary_vector": vec
-                })
-
-        result_df = pd.DataFrame(vectors)
-        self.fixation_binary_vectors = result_df
-        logger.info("Fixation binary vector generation complete.")
-        if return_df:
-            return result_df
-
-
-    def save_fixation_binary_vectors(self):
-        """
-        Saves the fixation_binary_vectors DataFrame to disk if it exists and is not empty.
-        """
-        if self.fixation_binary_vectors is not None and not self.fixation_binary_vectors.empty:
-            path = self.config.fix_binary_vec_df_path
-            save_df_to_pkl(self.fixation_binary_vectors, path)
-            logger.info(f"Saved fixation binary vectors to {path}")
-        else:
-            logger.warning("Fixation binary vectors not available or empty — skipping save.")
-
-
-    def load_fixation_binary_vectors(self):
-        """
-        Loads the fixation_binary_vectors DataFrame from disk if available.
-        """
-        path = self.config.fix_binary_vec_df_path
-        if path.exists():
-            self.fixation_binary_vectors = load_df_from_pkl(path)
-            logger.info(f"Loaded fixation binary vectors from {path}")
-        else:
-            logger.warning(f"No fixation_binary_vectors.pkl found at {path}")
-
-
-    def generate_saccade_binary_vectors(self, return_df: bool = False) -> Optional[pd.DataFrame]:
-        """
-        Generates binary vectors for each saccade 'from' and 'to' category per run and agent.
-        Stores the result in self.saccade_binary_vectors and optionally returns it.
-
-        Args:
-            return_df (bool): If True, returns the binary vector DataFrame.
-
-        Returns:
-            Optional[pd.DataFrame]: Long-format DataFrame of binary vectors (if return_df=True).
-        """
-        logger.info("\n ** Generating saccade binary vectors...")
-
-        if self.saccades is None or self.saccades.empty:
-            logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
-            self.load_dataframes("saccades")
-
-        if not {"from", "to", "start", "stop"}.issubset(self.saccades.columns):
-            logger.error("Saccade dataframe must contain 'from', 'to', 'start', and 'stop' columns.")
-            return None
-
-        run_lengths_df = self.gaze_data.get_data('run_lengths')
-        vectors = []
-
-        grouped = self.saccades.groupby(["session_name", "run_number", "agent"])
-        for (session, run, agent), group in grouped:
-            run_len_match = run_lengths_df.query("session_name == @session and run_number == @run")
-            if run_len_match.empty:
-                logger.warning("Run length missing for %s-%s-%s — skipping", session, run, agent)
+            # --- Filter category ---
+            category_key = btype.replace("_fixation", "").replace("saccade_from_", "").replace("saccade_to_", "")
+            df = df[df[filter_column] == category_key]
+            if df.empty:
+                logger.warning("No events found for %s — skipping", btype)
                 continue
-            run_length = int(run_len_match["run_length"].values[0])
 
-            from_dict = defaultdict(lambda: np.zeros(run_length, dtype=int))
-            to_dict = defaultdict(lambda: np.zeros(run_length, dtype=int))
+            run_lengths_df = self.gaze_data.get_data("run_lengths")
+            vectors = []
 
-            for _, row in group.iterrows():
-                start, stop = row["start"], row["stop"]
-                from_cat, to_cat = row["from"], row["to"]
-                from_dict[from_cat][start:stop + 1] = 1
-                to_dict[to_cat][start:stop + 1] = 1
+            grouped = df.groupby(["session_name", "run_number", "agent"])
+            for (session, run, agent), group in grouped:
+                run_len_match = run_lengths_df.query("session_name == @session and run_number == @run")
+                if run_len_match.empty:
+                    logger.warning("Run length missing for %s-%s-%s — skipping", session, run, agent)
+                    continue
+                run_length = int(run_len_match["run_length"].values[0])
+                binary_vector = np.zeros(run_length, dtype=int)
+                for _, row in group.iterrows():
+                    binary_vector[row["start"]:row["stop"] + 1] = 1
 
-            for cat, vec in from_dict.items():
                 vectors.append({
                     "session_name": session,
                     "run_number": run,
                     "agent": agent,
-                    "from_or_to": "from",
-                    "saccade_type": cat,
-                    "binary_vector": vec
+                    "behavior_type": btype,
+                    "binary_vector": binary_vector
                 })
 
-            for cat, vec in to_dict.items():
-                vectors.append({
-                    "session_name": session,
-                    "run_number": run,
-                    "agent": agent,
-                    "from_or_to": "to",
-                    "saccade_type": cat,
-                    "binary_vector": vec
-                })
+            result_df = pd.DataFrame(vectors)
+            out_path = get_behav_binary_vector_path(self.config, btype)
 
-        result_df = pd.DataFrame(vectors)
-        self.saccade_binary_vectors = result_df
-        logger.info("Saccade binary vector generation complete.")
+            if result_df.empty:
+                logger.warning(f"{btype} binary vector dataframe is empty — skipping save.")
+            else:
+                save_df_to_pkl(result_df, out_path)
+                self.binary_vector_paths[btype] = out_path
+                logger.info("Saved %s binary vectors to %s", btype, out_path)
+
+            last_df = result_df
+
         if return_df:
-            return result_df
+            return last_df
+
+
+    def get_binary_vector_df(self, behavior_type: str) -> pd.DataFrame:
+        """
+        Loads and returns the binary vector dataframe for the specified behavior type.
+        """
+        path = self.binary_vector_paths.get(behavior_type)
+        if path is None or not path.exists():
+            raise FileNotFoundError(f"Binary vector file for {behavior_type} not found at: {path}")
+        return load_df_from_pkl(path)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     # -------------------
     # Helper methods

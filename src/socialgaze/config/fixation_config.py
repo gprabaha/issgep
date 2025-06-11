@@ -42,6 +42,17 @@ class FixationConfig(BaseConfig):
         self.mem_per_cpu = 8000
         self.time_limit = "00:15:00"
 
+        # === Binary vectors to generate ===
+        self.binary_vector_types_to_generate = [
+            "face_fixation",
+            "saccade_to_face",
+            "saccade_from_face",
+
+            "out_of_roi_fixation",
+            "saccade_to_out_of_roi",
+            "saccade_from_out_of_roi"
+        ]
+
         # == Annotation ==
         self.use_parallel = False
 
@@ -52,7 +63,6 @@ class FixationConfig(BaseConfig):
         self.temp_dir = get_fixation_temp_dir(self.processed_data_dir)
         self.fixation_df_path = get_fixation_df_path(self.processed_data_dir)
         self.saccade_df_path = get_saccade_df_path(self.processed_data_dir)
-        self.fix_binary_vec_df_path = get_fix_binary_vec_df_path(self)
         self.job_file_path = get_job_file_path(self.project_root, self.job_file_name)
         self.job_out_dir = get_job_out_dir(self.project_root)
         self.log_dir = get_log_dir(self.job_out_dir)
@@ -73,7 +83,8 @@ class FixationConfig(BaseConfig):
             "cpus_per_task": self.cpus_per_task,
             "mem_per_cpu": self.mem_per_cpu,
             "time_limit": self.time_limit,
-            "fixation_type_to_process": self.fixation_type_to_process
+            "fixation_type_to_process": self.fixation_type_to_process,
+            "binary_vector_types_to_generate": self.binary_vector_types_to_generate,
         }
 
     def save_to_json(self):

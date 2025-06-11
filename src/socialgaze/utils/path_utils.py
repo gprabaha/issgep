@@ -238,6 +238,18 @@ def get_saccade_df_path(processed_data_dir: Path) -> Path:
     processed_data_dir.mkdir(parents=True, exist_ok=True)
     return processed_data_dir / "saccades.pkl"
 
+
+def get_behav_binary_vector_path(config, behavior_type: str) -> Path:
+    """
+    Returns the output path for a given binary vector type.
+    e.g., face_fixation → processed_data_dir/binary_vectors/face_fixation.pkl
+    """
+    binary_vec_dir = Path(config.processed_data_dir) / "binary_vectors"
+    binary_vec_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{behavior_type}.pkl"
+    return binary_vec_dir / filename
+
+
 # == Interactivity paths ==
 
 def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
