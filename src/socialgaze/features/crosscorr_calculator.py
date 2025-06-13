@@ -64,7 +64,7 @@ class CrossCorrCalculator:
                     v2 = agent_data[(a2, b2)]
                     lags, corr = _compute_normalized_crosscorr(
                         v1, v2,
-                        max_lag=self.config.max_lag,
+                        max_lag=None,
                         normalize=self.config.normalize,
                         use_energy_norm=self.config.use_energy_norm
                     )
@@ -76,7 +76,8 @@ class CrossCorrCalculator:
                         "behavior1": b1,
                         "behavior2": b2,
                         "lag": lags,
-                        "value": corr
+                        "crosscorr": corr,
+                        "period_type": "full"
                     })
                     all_rows.append(rows)
                 if all_rows:
@@ -86,6 +87,93 @@ class CrossCorrCalculator:
                     save_df_to_pkl(full_df, save_path)
         logger.info("All cross-correlations saved.")
 
+    def compute_crosscorrelations_by_period(self):
+        assert self.interactivity_detector is not None, "InteractivityDetector must be provided."
+        logger.info("Computing cross-correlations for interactive and non-interactive periods...")
+
+        behavior_types = self.config.binary_vector_types_to_use
+        all_dfs = []
+        for btype in behavior_types:
+            try:
+                df = self.fixation_detector.get_binary_vector_df(btype)
+                all_dfs.append(df)
+            except FileNotFoundError:
+                logger.warning(f"Missing binary vector for: {btype}")
+        if not all_dfs:
+            logger.warning("No binary vector data loaded. Exiting.")
+            return
+
+        bv_df = pd.concat(all_dfs, ignore_index=True)
+        grouped = bv_df.groupby(["session_name", "run_number"])
+        agent_behaviors = bv_df[["agent", "behavior_type"]].drop_duplicates().values.tolist()
+        inter_df = self.interactivity_detector.load_interactivity_periods()
+
+        for (a1, b1) in tqdm(agent_behaviors, desc="Agent-behavior loop"):
+            for (a2, b2) in agent_behaviors:
+                if a1 == a2:
+                    continue
+
+                for period_type in ["interactive", "non_interactive"]:
+                    comparison_name = f"{a1}_{b1}__vs__{a2}_{b2}_{period_type}"
+                    all_rows = []
+
+                    for (session, run), run_df in tqdm(grouped, desc=f"Runs for {comparison_name}", leave=False):
+                        agent_data = {
+                            (row["agent"], row["behavior_type"]): row["binary_vector"]
+                            for _, row in run_df.iterrows()
+                        }
+                        if (a1, b1) not in agent_data or (a2, b2) not in agent_data:
+                            continue
+
+                        v1 = agent_data[(a1, b1)]
+                        v2 = agent_data[(a2, b2)]
+
+                        run_periods = inter_df[
+                            (inter_df.session_name == session) &
+                            (inter_df.run_number == run)
+                        ]
+                        if run_periods.empty:
+                            continue
+
+                        inter = run_periods[["start", "stop"]].values
+
+                        if period_type == "interactive":
+                            period_stops = inter
+                        else:
+                            full_range = [(0, len(v1)-1)]
+                            period_stops = _compute_complement_periods(inter, full_range)
+
+                        for start, stop in period_stops:
+                            seg1 = v1[start:stop+1]
+                            seg2 = v2[start:stop+1]
+                            if len(seg1) < 2 or len(seg2) < 2:
+                                continue
+                            lags, corr = _compute_normalized_crosscorr(
+                                seg1, seg2,
+                                max_lag=None,
+                                normalize=self.config.normalize,
+                                use_energy_norm=self.config.use_energy_norm
+                            )
+                            rows = pd.DataFrame({
+                                "session_name": session,
+                                "run_number": run,
+                                "agent1": a1,
+                                "agent2": a2,
+                                "behavior1": b1,
+                                "behavior2": b2,
+                                "lag": lags,
+                                "crosscorr": corr,
+                                "period_type": period_type
+                            })
+                            all_rows.append(rows)
+
+                    if all_rows:
+                        full_df = pd.concat(all_rows, ignore_index=True)
+                        save_path = get_crosscorr_output_path(self.config, comparison_name)
+                        os.makedirs(save_path.parent, exist_ok=True)
+                        save_df_to_pkl(full_df, save_path)
+
+        logger.info("All interactive/non-interactive cross-correlations saved.")
 
     def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:
         path = get_crosscorr_output_path(self.config, comparison_name)
@@ -94,13 +182,18 @@ class CrossCorrCalculator:
         return load_df_from_pkl(path)
 
 
-def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: int, normalize: bool = True, use_energy_norm: bool = False):
+def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: Optional[int] = None, normalize: bool = True, use_energy_norm: bool = False):
     x = x.astype(float)
     y = y.astype(float)
     corr_full = fftconvolve(x, y[::-1], mode="full")
-    center = len(corr_full) // 2
-    lags = np.arange(-max_lag, max_lag + 1)
-    corr = corr_full[center - max_lag:center + max_lag + 1]
+    lags_full = np.arange(-len(y) + 1, len(x))
+    corr = corr_full
+    lags = lags_full
+
+    if max_lag is not None:
+        center = len(corr_full) // 2
+        corr = corr_full[center - max_lag:center + max_lag + 1]
+        lags = lags_full[center - max_lag:center + max_lag + 1]
 
     if normalize:
         if use_energy_norm:
@@ -119,3 +212,16 @@ def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: int, no
 
     return lags, corr
 
+
+def _compute_complement_periods(included: np.ndarray, total: List[tuple]) -> List[tuple]:
+    if included.size == 0:
+        return total
+    complement = []
+    current = total[0][0]
+    for start, stop in included:
+        if current < start:
+            complement.append((current, start - 1))
+        current = stop + 1
+    if current <= total[0][1]:
+        complement.append((current, total[0][1]))
+    return complement
