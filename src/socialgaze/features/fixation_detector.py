@@ -296,12 +296,17 @@ class FixationDetector:
         if return_df:
             return last_df
 
+
     def get_binary_vector_df(self, behavior_type: str) -> pd.DataFrame:
         """
         Loads and returns the binary vector dataframe for the specified behavior type.
+        Falls back to constructing the path if it's not already tracked in self.binary_vector_paths.
         """
         path = self.binary_vector_paths.get(behavior_type)
-        if path is None or not path.exists():
+        if path is None:
+            logger.info(f"Binary vector path for {behavior_type} not found in cache, constructing path and then loading")
+            path = get_behav_binary_vector_path(self.config, behavior_type)
+        if not path.exists():
             raise FileNotFoundError(f"Binary vector file for {behavior_type} not found at: {path}")
         return load_df_from_pkl(path)
 

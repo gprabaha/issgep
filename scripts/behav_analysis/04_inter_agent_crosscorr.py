@@ -16,8 +16,8 @@ def main():
     # Load all configs
     base_config = BaseConfig()
     fixation_config = FixationConfig()
-    fix_prob_config = FixProbConfig()
     interactivity_config = InteractivityConfig()
+    crosscorr_config = CrossCorrConfig()
 
     # Initialize core data and detectors
     gaze_data = GazeData(config=base_config)
@@ -30,6 +30,7 @@ def main():
         fixation_detector=fixation_detector,
         interactivity_detector=interactivity_detector
     )
+    crosscorr_calculator.compute_and_save_crosscorrelations()
 
 
 if __name__ == "__main__":

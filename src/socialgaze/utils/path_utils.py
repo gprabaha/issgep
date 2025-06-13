@@ -258,6 +258,24 @@ def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
 def get_interactivity_df_path(config, fixation_type='face') -> Path:
     return config.processed_data_dir / "interactive_periods.pkl"
 
+
+# == CrossCorr Paths ==
+
+def get_crosscorr_output_path(config, comparison_name: str) -> Path:
+    """
+    Constructs the full output path for a cross-correlation dataframe.
+
+    Args:
+        config: Config object containing base output directory info.
+        comparison_name: String identifying the comparison (e.g., 'm1_face_fixation__vs__m2_saccade_to_face').
+
+    Returns:
+        Path object pointing to the intended .pkl file.
+    """
+    base_dir = Path(config.output_dir)
+    out_dir = base_dir / "crosscorr"
+    return out_dir / f"{comparison_name}.pkl"
+
 # == PSTH paths ==
  
 def get_psth_per_trial_path(config) -> str:
