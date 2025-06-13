@@ -65,7 +65,8 @@ class CrossCorrCalculator:
                     lags, corr = _compute_normalized_crosscorr(
                         v1, v2,
                         max_lag=self.config.max_lag,
-                        normalize=self.config.normalize
+                        normalize=self.config.normalize,
+                        use_energy_norm=self.config.use_energy_norm
                     )
                     rows = pd.DataFrame({
                         "session_name": session,
@@ -93,7 +94,7 @@ class CrossCorrCalculator:
         return load_df_from_pkl(path)
 
 
-def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: int, normalize: bool = True):
+def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: int, normalize: bool = True, use_energy_norm: bool = False):
     x = x.astype(float)
     y = y.astype(float)
     corr_full = fftconvolve(x, y[::-1], mode="full")
@@ -102,10 +103,19 @@ def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: int, no
     corr = corr_full[center - max_lag:center + max_lag + 1]
 
     if normalize:
-        x_std = np.std(x)
-        y_std = np.std(y)
-        if x_std > 0 and y_std > 0:
-            corr /= (len(x) * x_std * y_std)
+        if use_energy_norm:
+            norm = np.sqrt(np.sum(x ** 2) * np.sum(y ** 2))
+            if norm > 0:
+                corr /= norm
+            else:
+                corr[:] = 0
         else:
-            corr[:] = 0
+            x_std = np.std(x)
+            y_std = np.std(y)
+            if x_std > 0 and y_std > 0:
+                corr /= (len(x) * x_std * y_std)
+            else:
+                corr[:] = 0
+
     return lags, corr
+
