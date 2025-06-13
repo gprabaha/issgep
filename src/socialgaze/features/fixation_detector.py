@@ -248,6 +248,23 @@ class FixationDetector:
 
         self.fixations["category"] = self.fixations["location"].apply(_categorize_fixations)
 
+    def add_saccade_category_columns(self):
+        """
+        Adds simplified 'from_category' and 'to_category' columns to the saccades DataFrame.
+        Categories are one of: 'face', 'object', or 'out_of_roi'.
+        """
+        logger.info("\n ** Categorizing saccade endpoints as 'face', 'object', or 'out_of_roi'")
+
+        if self.saccades is None or self.saccades.empty:
+            logger.info("Saccade dataframe not loaded yet. Attempting to load from disk.")
+            self.load_dataframes("saccades")
+
+        if "from" not in self.saccades.columns or "to" not in self.saccades.columns:
+            self.update_saccade_from_to()
+
+        self.saccades["from_category"] = self.saccades["from"].apply(_categorize_fixations)
+        self.saccades["to_category"] = self.saccades["to"].apply(_categorize_fixations)
+
 
     def generate_and_save_binary_vectors(
         self,
@@ -432,6 +449,7 @@ class FixationDetector:
 
         return self._build_binary_vector_dataframe(df, category_key=behavior_type)
 
+
     def _get_filtered_behavior_dataframe(self, behavior_type: str) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         is_fixation = behavior_type.endswith("_fixation")
         is_saccade = behavior_type.startswith("saccade_")
@@ -457,7 +475,10 @@ class FixationDetector:
             if not {"from", "to", "start", "stop"}.issubset(self.saccades.columns):
                 logger.error("Saccade dataframe missing required columns — skipping %s", behavior_type)
                 return None, None
-            filter_column = "from" if "from" in behavior_type else "to"
+            # Ensure categories are present
+            if "from_category" not in self.saccades.columns or "to_category" not in self.saccades.columns:
+                self.add_saccade_category_columns()
+            filter_column = "from_category" if "saccade_from_" in behavior_type else "to_category"
             return self.saccades.copy(), filter_column
 
         else:
@@ -593,6 +614,7 @@ def _find_matching_rois(position: np.ndarray, roi_df: pd.DataFrame) -> List[str]
         if roi["x_min"] <= position[0] <= roi["x_max"] and roi["y_min"] <= position[1] <= roi["y_max"]:
             matching_rois.append(roi["roi_name"])
     return matching_rois if matching_rois else ["out_of_roi"]
+
 
 def _merge_and_sort_gaze_events(fix_starts, fix_stops, sacc_starts, sacc_stops, fix_indices, sacc_indices):
     events = [(s, e, "fixation", i) for s, e, i in zip(fix_starts, fix_stops, range(len(fix_indices)))]
