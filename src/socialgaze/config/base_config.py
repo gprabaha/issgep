@@ -32,11 +32,11 @@ from socialgaze.utils.discovery_utils import (
     get_config_filename,
     get_mat_filename_pattern,
     find_valid_sessions,
-    filter_sessions_with_ephys
+    filter_sessions_with_ephys,
+    get_num_available_cpus
 )
 from socialgaze.utils.saving_utils import save_config_to_json
 from socialgaze.utils.conversion_utils import object_to_dict, assign_dict_attributes_to_object
-from socialgaze.utils.discovery_utils import get_num_available_cpus
 
 
 logger = logging.getLogger(__name__)

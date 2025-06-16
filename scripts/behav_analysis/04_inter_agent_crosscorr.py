@@ -33,7 +33,7 @@ def main():
         fixation_detector=fixation_detector,
         interactivity_detector=interactivity_detector
     )
-    crosscorr_calculator.compute_and_save_crosscorrelations()
+    crosscorr_calculator.compute_crosscorrelations()
 
 
 if __name__ == "__main__":
