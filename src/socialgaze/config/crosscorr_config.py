@@ -22,3 +22,5 @@ class CrossCorrConfig(FixationConfig):
         self.max_lag: int = 30000  # lag in frames: 30 seconds since data is at 1khz
         self.normalize: bool = True
         self.use_energy_norm: bool = True
+        self.make_shuffle_stringent: bool = True
+        self.num_shuffles: int = 100
