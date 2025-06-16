@@ -2,7 +2,7 @@
 
 import pandas as pd
 import numpy as np
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from tqdm import tqdm
 from scipy.signal import fftconvolve
 import logging
@@ -93,6 +93,47 @@ class CrossCorrCalculator:
                     _save_crosscorr_df(full_df, name, self.config)
 
         logger.info("Cross-correlation computation complete.")
+
+
+
+    def compute_shuffled_crosscorrelations(self):
+        logger.info("Computing shuffled cross-correlations...")
+
+        for a1, b1, a2, b2 in tqdm(self.config.crosscorr_agent_behavior_pairs, desc="Agent-behavior pairs"):
+            try:
+                df1 = self.fixation_detector.get_binary_vector_df(b1)
+                df2 = self.fixation_detector.get_binary_vector_df(b2)
+            except FileNotFoundError:
+                logger.warning(f"Missing binary vector: {b1} or {b2}")
+                continue
+
+            df1 = df1[df1["agent"] == a1]
+            df2 = df2[df2["agent"] == a2]
+            if df1.empty or df2.empty:
+                continue
+
+            merged = pd.concat([df1, df2], ignore_index=True)
+            grouped = list(merged.groupby(["session_name", "run_number"]))
+
+            if self.config.show_inner_tqdm:
+                grouped = tqdm(grouped, desc=f"{a1}_{b1} vs {a2}_{b2} (shuffled)", leave=False)
+
+            results = Parallel(n_jobs=self.config.num_cpus) if self.config.use_parallel else map
+            all_batches = results(
+                delayed(_process_one_shuffled_crosscorr)(
+                    session, run, run_df, a1, b1, a2, b2, self.config
+                )
+                for (session, run), run_df in grouped
+            )
+
+            rows_flat = [df for batch in all_batches if batch for df in batch]
+
+            if rows_flat:
+                full_df = pd.concat(rows_flat, ignore_index=True)
+                name = f"{a1}_{b1}__vs__{a2}_{b2}_shuffled"
+                _save_crosscorr_df(full_df, name, self.config)
+
+        logger.info("Shuffled cross-correlation computation complete.")
 
 
 
@@ -215,3 +256,125 @@ def _compute_complement_periods(included: np.ndarray, total: List[tuple]) -> Lis
     if current <= total[0][1]:
         complement.append((current, total[0][1]))
     return complement
+
+
+def _process_one_shuffled_crosscorr(session, run, run_df, a1, b1, a2, b2, config):
+    v1, v2 = _get_vectors_for_run(run_df, a1, b1, a2, b2)
+    if v1 is None or v2 is None:
+        return []
+
+    try:
+        shuffled_vecs = _generate_shuffled_vectors_for_run(
+            v1, run_length=len(v1),
+            num_shuffles=config.num_shuffles,
+            num_cpus=config.num_cpus,
+            stringent=config.make_shuffle_stringent,
+        )
+    except Exception as e:
+        logger.warning(f"Shuffling failed for {session}-{run} | {a1} {b1}: {e}")
+        return []
+
+    rows = []
+    for i, s_v1 in enumerate(shuffled_vecs):
+        lags, corr = _compute_normalized_crosscorr(
+            s_v1, v2,
+            max_lag=None,
+            normalize=config.normalize,
+            use_energy_norm=config.use_energy_norm
+        )
+        df = pd.DataFrame({
+            "session_name": session,
+            "run_number": run,
+            "agent1": a1,
+            "agent2": a2,
+            "behavior1": b1,
+            "behavior2": b2,
+            "lag": lags,
+            "shuffle_index": i,
+            "crosscorr": corr,
+        })
+        rows.append(df)
+    return rows
+
+
+def _generate_shuffled_vectors_for_run(
+    original_vector: np.ndarray,
+    run_length: int,
+    num_shuffles: int,
+    num_cpus: int,
+    stringent: bool
+) -> List[np.ndarray]:
+    ones = np.where(original_vector == 1)[0]
+    if len(ones) == 0:
+        return [np.zeros(run_length, dtype=int) for _ in range(num_shuffles)]
+
+    # Identify contiguous 1-segments as fixation intervals
+    starts = ones[np.diff(np.concatenate(([-2], ones))) > 1]
+    stops = ones[np.diff(np.concatenate((ones, [run_length + 2]))) > 1]
+    fixation_durations = [stop - start + 1 for start, stop in zip(starts, stops)]
+    total_fix_dur = sum(fixation_durations)
+    non_fix_dur = run_length - total_fix_dur
+
+    return Parallel(n_jobs=num_cpus)(
+        delayed(_generate_single_shuffled_vector)(
+            fixation_durations, non_fix_dur, run_length, stringent
+        ) for _ in range(num_shuffles)
+    )
+
+
+def _generate_single_shuffled_vector(
+    fixation_durations: List[int],
+    non_fixation_total: int,
+    run_length: int,
+    stringent: bool
+) -> np.ndarray:
+    if not fixation_durations:
+        return np.zeros(run_length, dtype=int)
+
+    if stringent:
+        non_fixation_durations = _generate_uniform_partitions(non_fixation_total, len(fixation_durations) + 1)
+        segments = _interleave_segments(fixation_durations, non_fixation_durations)
+    else:
+        return np.random.permutation(np.array([1 if i in fixation_durations else 0 for i in range(run_length)]))
+
+    return _construct_shuffled_vector(segments, run_length)
+
+
+def _generate_uniform_partitions(total: int, n_parts: int) -> List[int]:
+    if n_parts == 1:
+        return [total]
+    cuts = np.sort(np.random.choice(range(1, total), n_parts - 1, replace=False))
+    parts = np.diff(np.concatenate([[0], cuts, [total]]))
+    while sum(parts) != total:
+        diff = total - sum(parts)
+        idx = np.random.choice(len(parts), size=abs(diff), replace=True)
+        for i in idx:
+            if diff > 0:
+                parts[i] += 1
+            elif parts[i] > 1:
+                parts[i] -= 1
+    return parts.tolist()
+
+
+def _interleave_segments(fix_durs: List[int], non_fix_durs: List[int]) -> List[Tuple[int, int]]:
+    np.random.shuffle(fix_durs)
+    np.random.shuffle(non_fix_durs)
+    segments = []
+    for i in range(len(fix_durs)):
+        segments.append((non_fix_durs[i], 0))
+        segments.append((fix_durs[i], 1))
+    segments.append((non_fix_durs[-1], 0))
+    return segments
+
+
+def _construct_shuffled_vector(segments: List[Tuple[int, int]], run_length: int) -> np.ndarray:
+    vec = np.zeros(run_length, dtype=int)
+    idx = 0
+    for dur, val in segments:
+        if idx >= run_length:
+            break
+        end = min(idx + dur, run_length)
+        if val == 1:
+            vec[idx:end] = 1
+        idx += dur
+    return vec
