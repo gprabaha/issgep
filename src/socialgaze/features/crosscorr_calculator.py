@@ -108,8 +108,8 @@ class CrossCorrCalculator:
         period_types = ["interactive", "non_interactive"] if by_interactivity_period else ["full"]
 
         for a1, b1, a2, b2 in self.config.crosscorr_agent_behavior_pairs:
-            for session in self.fixation_detector.config.session_names:
-                runs = self.fixation_detector.config.runs_by_session.get(session, [])
+            for session in self.config.session_names:
+                runs = self.config.runs_by_session.get(session, [])
                 for run in runs:
                     for period_type in period_types:
                         tasks.append((session, run, a1, b1, a2, b2, period_type))

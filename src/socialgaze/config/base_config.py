@@ -117,7 +117,7 @@ class BaseConfig:
             self.extract_sessions_with_ephys_data(self.ephys_days_and_monkeys_df)
         else:
             # Local machine: load cached session/run metadata if available
-            cache_path = self.config_folder / "discovered_sessions_and_runs.pkl"
+            cache_path = self.processed_data_dir / "discovered_sessions_and_runs.pkl"
             if cache_path.exists():
                 df = pd.read_pickle(cache_path)
                 self.session_names = sorted(df["session_name"].unique().tolist())
@@ -188,7 +188,7 @@ class BaseConfig:
             for s in self.session_names
             for run in self.runs_by_session[s]
         ])
-        session_df.to_pickle(self.config_folder / "discovered_sessions_and_runs.pkl")
+        session_df.to_pickle(self.processed_data_dir / "discovered_sessions_and_runs.pkl")
 
 
     def extract_sessions_with_ephys_data(self, ephys_days_and_monkeys_df: pd.DataFrame) -> None:
