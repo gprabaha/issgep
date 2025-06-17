@@ -16,6 +16,7 @@ from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.utils.path_utils import get_crosscorr_output_path
 from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.utils.saving_utils import save_df_to_pkl
+from socialgaze.utils.hpc_utils import generate_crosscorr_job_file, submit_dsq_array_job
 
 logger = logging.getLogger(__name__)
 
@@ -95,46 +96,114 @@ class CrossCorrCalculator:
         logger.info("Cross-correlation computation complete.")
 
 
+    def compute_shuffled_crosscorrelations(self, by_interactivity_period: bool = False):
+        """
+        Generates and submits a SLURM job array for shuffled cross-correlation calculation.
+        One job per session-run and agent-behavior pair. Includes interactivity-specific variants if requested.
+        """
+        logger.info(f"Preparing shuffled cross-correlation job array "
+                    f"({'by interactivity' if by_interactivity_period else 'full'})...")
 
-    def compute_shuffled_crosscorrelations(self):
-        logger.info("Computing shuffled cross-correlations...")
+        tasks = []
+        period_types = ["interactive", "non_interactive"] if by_interactivity_period else ["full"]
 
-        for a1, b1, a2, b2 in tqdm(self.config.crosscorr_agent_behavior_pairs, desc="Agent-behavior pairs"):
+        for a1, b1, a2, b2 in self.config.crosscorr_agent_behavior_pairs:
+            for session in self.fixation_detector.config.session_names:
+                runs = self.fixation_detector.config.runs_by_session.get(session, [])
+                for run in runs:
+                    for period_type in period_types:
+                        tasks.append((session, run, a1, b1, a2, b2, period_type))
+
+        if not tasks:
+            logger.warning("No valid tasks to run.")
+            return
+
+        generate_crosscorr_job_file(tasks, self.config)
+        submit_dsq_array_job(self.config)
+
+
+
+    def compute_shuffled_crosscorrelations_for_single_run(self, session, run, a1, b1, a2, b2, period_type="full"):
+        try:
+            df1 = self.fixation_detector.get_binary_vector_df(b1)
+            df2 = self.fixation_detector.get_binary_vector_df(b2)
+        except FileNotFoundError:
+            logger.warning(f"Missing binary vector: {b1} or {b2}")
+            return
+
+        df1 = df1[(df1["agent"] == a1) & (df1["session_name"] == session) & (df1["run_number"] == run)]
+        df2 = df2[(df2["agent"] == a2) & (df2["session_name"] == session) & (df2["run_number"] == run)]
+
+        if df1.empty or df2.empty:
+            logger.warning(f"No data for session {session}, run {run}")
+            return
+
+        run_df = pd.concat([df1, df2], ignore_index=True)
+        v1, v2 = _get_vectors_for_run(run_df, a1, b1, a2, b2)
+        if v1 is None or v2 is None:
+            return
+
+        if period_type == "full":
+            periods = [(0, len(v1) - 1)]
+        else:
+            inter_df = self.interactivity_detector.load_interactivity_periods()
+            periods = _get_periods_for_run(inter_df, session, run, period_type, len(v1))
+            if not periods:
+                return
+
+        all_rows = []
+        for start, stop in periods:
+            seg1 = v1[start:stop + 1]
+            seg2 = v2[start:stop + 1]
+            if len(seg1) < 2 or len(seg2) < 2:
+                continue
+
             try:
-                df1 = self.fixation_detector.get_binary_vector_df(b1)
-                df2 = self.fixation_detector.get_binary_vector_df(b2)
-            except FileNotFoundError:
-                logger.warning(f"Missing binary vector: {b1} or {b2}")
-                continue
-
-            df1 = df1[df1["agent"] == a1]
-            df2 = df2[df2["agent"] == a2]
-            if df1.empty or df2.empty:
-                continue
-
-            merged = pd.concat([df1, df2], ignore_index=True)
-            grouped = list(merged.groupby(["session_name", "run_number"]))
-
-            if self.config.show_inner_tqdm:
-                grouped = tqdm(grouped, desc=f"{a1}_{b1} vs {a2}_{b2} (shuffled)", leave=False)
-
-            results = Parallel(n_jobs=self.config.num_cpus) if self.config.use_parallel else map
-            all_batches = results(
-                delayed(_process_one_shuffled_crosscorr)(
-                    session, run, run_df, a1, b1, a2, b2, self.config
+                shuffled_vecs = _generate_shuffled_vectors_for_run(
+                    seg1, run_length=len(seg1),
+                    num_shuffles=self.config.num_shuffles,
+                    num_cpus=self.config.num_cpus,
+                    stringent=self.config.make_shuffle_stringent,
                 )
-                for (session, run), run_df in grouped
-            )
+            except Exception as e:
+                logger.warning(f"Shuffling failed for {session}-{run} | {a1} {b1}: {e}")
+                continue
 
-            rows_flat = [df for batch in all_batches if batch for df in batch]
+            corrs = []
+            for s_v1 in shuffled_vecs:
+                _, c = _compute_normalized_crosscorr(
+                    s_v1, seg2,
+                    max_lag=None,
+                    normalize=self.config.normalize,
+                    use_energy_norm=self.config.use_energy_norm
+                )
+                corrs.append(c)
 
-            if rows_flat:
-                full_df = pd.concat(rows_flat, ignore_index=True)
-                name = f"{a1}_{b1}__vs__{a2}_{b2}_shuffled"
-                _save_crosscorr_df(full_df, name, self.config)
+            corrs = np.stack(corrs)
+            mean_corr = np.mean(corrs, axis=0)
+            std_corr = np.std(corrs, axis=0)
+            lags = _compute_normalized_crosscorr(seg1, seg2)[0]
 
-        logger.info("Shuffled cross-correlation computation complete.")
+            df = pd.DataFrame({
+                "session_name": session,
+                "run_number": run,
+                "agent1": a1,
+                "agent2": a2,
+                "behavior1": b1,
+                "behavior2": b2,
+                "lag": lags,
+                "crosscorr_mean": mean_corr,
+                "crosscorr_std": std_corr,
+                "period_type": period_type
+            })
+            all_rows.append(df)
 
+        if all_rows:
+            out_df = pd.concat(all_rows, ignore_index=True)
+            name = f"{a1}_{b1}__vs__{a2}_{b2}_shuffled"
+            if period_type != "full":
+                name += f"_{period_type}"
+            _save_crosscorr_df(out_df, name, self.config)
 
 
     def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:

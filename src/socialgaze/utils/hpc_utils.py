@@ -37,6 +37,37 @@ def generate_fixation_job_file(tasks: List[Tuple[str, str, str]], config) -> Non
     logger.info("Wrote fixation job file to %s", job_file_path)
 
 
+def generate_crosscorr_job_file(tasks: List[Tuple[str, int, str, str, str, str, str]], config) -> None:
+    """
+    Generate a job array file with one command per (session, run, a1, b1, a2, b2, period_type).
+
+    Args:
+        tasks: List of (session, run, a1, b1, a2, b2, period_type) tuples.
+        config: CrossCorrConfig object with env_name, job_file_path, etc.
+    """
+    job_file_path = config.job_file_path
+    worker_script = config.worker_python_script_path
+    env_name = config.env_name
+
+    os.makedirs(job_file_path.parent, exist_ok=True)
+
+    with open(job_file_path, "w") as f:
+        for session, run, a1, b1, a2, b2, period_type in tasks:
+            cmd = (
+                f"module load miniconda; "
+                f"conda activate {env_name}; "
+                f"python {worker_script} "
+                f"--session {session} --run {run} "
+                f"--a1 {a1} --b1 {b1} --a2 {a2} --b2 {b2} "
+                f"--mode shuffled --period_type {period_type}"
+            )
+            f.write(cmd + "\n")
+
+    logger.info("Wrote shuffled cross-correlation job file to %s", job_file_path)
+
+
+
+
 def submit_dsq_array_job(config) -> str:
     """
     Submits a dSQ job array using parameters from the FixationConfig.

@@ -333,6 +333,8 @@ def get_fixation_temp_dir(processed_data_dir: Path) -> Path:
     temp_dir.mkdir(parents=True, exist_ok=True)
     return temp_dir
 
+def get_crosscorr_job_file_path(config) -> Path:
+    return config.project_root / "jobs" / "scripts" / "crosscorr_jobs.tsv"
 
 def get_job_file_path(project_root: Path, job_file_name: str) -> Path:
     """
@@ -356,6 +358,7 @@ def get_worker_python_script_path(project_root: Path, relative_script_path: str)
     Returns the full path to the Python worker script that is executed by the job array.
     """
     return Path(project_root) / relative_script_path
+
 
 
 def get_fixation_job_result_path(temp_dir: Path, session: str, run: str, agent: str) -> Path:

@@ -98,7 +98,7 @@ class BaseConfig:
         self.runs_by_session: Dict[str, List[str]] = {}
 
         if self.is_cluster:
-            # Only define and validate raw data paths if on a cluster
+            # Cluster: Discover from filesystem
             self.data_dir = determine_root_data_dir(
                 is_cluster=self.is_cluster,
                 is_grace=self.is_grace,
@@ -115,6 +115,21 @@ class BaseConfig:
 
             self.spiketimes_mat_path = get_spike_times_mat_path(self)
             self.extract_sessions_with_ephys_data(self.ephys_days_and_monkeys_df)
+        else:
+            # Local machine: load cached session/run metadata if available
+            cache_path = self.config_folder / "discovered_sessions_and_runs.pkl"
+            if cache_path.exists():
+                df = pd.read_pickle(cache_path)
+                self.session_names = sorted(df["session_name"].unique().tolist())
+                self.runs_by_session = (
+                    df.groupby("session_name")["run_number"]
+                    .apply(lambda x: sorted(x.astype(str).unique().tolist()))
+                    .to_dict()
+                )
+                logger.info(f"Loaded session/run metadata from {cache_path}")
+            else:
+                logger.warning("Session/run metadata not available locally. Please initialize on the cluster first.")
+
 
 
 
@@ -155,8 +170,8 @@ class BaseConfig:
 
     def initialize_sessions_and_runs(self) -> None:
         """
-        Populates `self.session_names` and `self.runs_by_session`
-        using a validity check on required .mat files.
+        Populates self.session_names and self.runs_by_session using validity checks.
+        Saves the result to disk for offline use.
         """
         self.session_names, self.runs_by_session = find_valid_sessions(
             self,
@@ -166,6 +181,15 @@ class BaseConfig:
                 'roi': get_roi_file_path,
             }
         )
+
+        # Save to disk
+        session_df = pd.DataFrame([
+            {"session_name": s, "run_number": run}
+            for s in self.session_names
+            for run in self.runs_by_session[s]
+        ])
+        session_df.to_pickle(self.config_folder / "discovered_sessions_and_runs.pkl")
+
 
     def extract_sessions_with_ephys_data(self, ephys_days_and_monkeys_df: pd.DataFrame) -> None:
         """
