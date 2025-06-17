@@ -261,6 +261,12 @@ def get_interactivity_df_path(config, fixation_type='face') -> Path:
 
 # == CrossCorr Paths ==
 
+def get_crosscorr_job_file_path(config) -> Path:
+    return config.project_root / "jobs" / "scripts" / "crosscorr_jobs.tsv"
+
+def get_crosscorr_worker_script_path(project_root: Path) -> Path:
+    return project_root / "scripts" / "behav_analysis" / "04_inter_agent_crosscorr.py"
+
 def get_crosscorr_output_path(config, comparison_name: str) -> Path:
     """
     Constructs the full output path for a cross-correlation dataframe.
@@ -275,6 +281,9 @@ def get_crosscorr_output_path(config, comparison_name: str) -> Path:
     base_dir = Path(config.output_dir)
     out_dir = base_dir / "crosscorr"
     return out_dir / f"{comparison_name}.pkl"
+
+def get_crosscorr_shuffled_output_dir(config) -> Path:
+    return Path(config.output_dir) / "crosscorr_shuffled"
 
 # == PSTH paths ==
  
@@ -332,9 +341,6 @@ def get_fixation_temp_dir(processed_data_dir: Path) -> Path:
     temp_dir = Path(processed_data_dir) / "temp"
     temp_dir.mkdir(parents=True, exist_ok=True)
     return temp_dir
-
-def get_crosscorr_job_file_path(config) -> Path:
-    return config.project_root / "jobs" / "scripts" / "crosscorr_jobs.tsv"
 
 def get_job_file_path(project_root: Path, job_file_name: str) -> Path:
     """

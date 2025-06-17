@@ -98,8 +98,8 @@ class CrossCorrCalculator:
 
     def compute_shuffled_crosscorrelations(self, by_interactivity_period: bool = False):
         """
-        Generates and submits a SLURM job array for shuffled cross-correlation calculation.
-        One job per session-run and agent-behavior pair. Includes interactivity-specific variants if requested.
+        If `run_single_test_case` is True in config, runs one task from the full set.
+        Otherwise submits a SLURM job array.
         """
         logger.info(f"Preparing shuffled cross-correlation job array "
                     f"({'by interactivity' if by_interactivity_period else 'full'})...")
@@ -116,6 +116,14 @@ class CrossCorrCalculator:
 
         if not tasks:
             logger.warning("No valid tasks to run.")
+            return
+
+        # Run one random test case if test flag is set
+        if self.config.run_single_test_case:
+            import random
+            test_task = random.choice(tasks)
+            logger.info(f"Running single test task: {test_task}")
+            self.compute_shuffled_crosscorrelations_for_single_run(*test_task)
             return
 
         generate_crosscorr_job_file(tasks, self.config)
@@ -169,15 +177,15 @@ class CrossCorrCalculator:
                 logger.warning(f"Shuffling failed for {session}-{run} | {a1} {b1}: {e}")
                 continue
 
-            corrs = []
-            for s_v1 in shuffled_vecs:
-                _, c = _compute_normalized_crosscorr(
+            corrs = Parallel(n_jobs=self.config.num_cpus)(
+                delayed(_compute_normalized_crosscorr)(
                     s_v1, seg2,
                     max_lag=None,
                     normalize=self.config.normalize,
                     use_energy_norm=self.config.use_energy_norm
-                )
-                corrs.append(c)
+                )[1]  # We only need the correlation values
+                for s_v1 in shuffled_vecs
+            )
 
             corrs = np.stack(corrs)
             mean_corr = np.mean(corrs, axis=0)
@@ -203,7 +211,13 @@ class CrossCorrCalculator:
             name = f"{a1}_{b1}__vs__{a2}_{b2}_shuffled"
             if period_type != "full":
                 name += f"_{period_type}"
-            _save_crosscorr_df(out_df, name, self.config)
+            
+            save_dir = self.config.crosscorr_shuffled_output_dir
+            os.makedirs(save_dir, exist_ok=True)
+            out_path = save_dir / f"{name}__{session}__run{run}.pkl"
+            out_df.to_pickle(out_path)
+            logger.info(f"Saved shuffled crosscorr: {out_path}")
+
 
 
     def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:
@@ -325,45 +339,6 @@ def _compute_complement_periods(included: np.ndarray, total: List[tuple]) -> Lis
     if current <= total[0][1]:
         complement.append((current, total[0][1]))
     return complement
-
-
-def _process_one_shuffled_crosscorr(session, run, run_df, a1, b1, a2, b2, config):
-    v1, v2 = _get_vectors_for_run(run_df, a1, b1, a2, b2)
-    if v1 is None or v2 is None:
-        return []
-
-    try:
-        shuffled_vecs = _generate_shuffled_vectors_for_run(
-            v1, run_length=len(v1),
-            num_shuffles=config.num_shuffles,
-            num_cpus=config.num_cpus,
-            stringent=config.make_shuffle_stringent,
-        )
-    except Exception as e:
-        logger.warning(f"Shuffling failed for {session}-{run} | {a1} {b1}: {e}")
-        return []
-
-    rows = []
-    for i, s_v1 in enumerate(shuffled_vecs):
-        lags, corr = _compute_normalized_crosscorr(
-            s_v1, v2,
-            max_lag=None,
-            normalize=config.normalize,
-            use_energy_norm=config.use_energy_norm
-        )
-        df = pd.DataFrame({
-            "session_name": session,
-            "run_number": run,
-            "agent1": a1,
-            "agent2": a2,
-            "behavior1": b1,
-            "behavior2": b2,
-            "lag": lags,
-            "shuffle_index": i,
-            "crosscorr": corr,
-        })
-        rows.append(df)
-    return rows
 
 
 def _generate_shuffled_vectors_for_run(
