@@ -1,14 +1,17 @@
 # src/socialgaze/features/crosscorr_calculator.py
 
-import pandas as pd
-import numpy as np
-from typing import Optional, Dict, List, Tuple
-from tqdm import tqdm
-from scipy.signal import fftconvolve
+import pdb
 import logging
 import os
+from typing import Optional, Dict, List, Tuple
+from glob import glob
+
+import random
+import pandas as pd
+import numpy as np
+from tqdm import tqdm
+from scipy.signal import fftconvolve
 from joblib import Parallel, delayed
-from contextlib import nullcontext
 
 from socialgaze.config.crosscorr_config import CrossCorrConfig
 from socialgaze.features.fixation_detector import FixationDetector
@@ -16,7 +19,11 @@ from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.utils.path_utils import get_crosscorr_output_path
 from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.utils.saving_utils import save_df_to_pkl
-from socialgaze.utils.hpc_utils import generate_crosscorr_job_file, submit_dsq_array_job
+from socialgaze.utils.hpc_utils import (
+    generate_crosscorr_job_file,
+    submit_dsq_array_job,
+    track_job_completion
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,20 +152,20 @@ class CrossCorrCalculator:
 
         # Run one random test case if test flag is set
         if self.config.run_single_test_case:
-            import random
             test_task = random.choice(tasks)
             logger.info(f"Running single test task: {test_task}")
             self.compute_shuffled_crosscorrelations_for_single_run(*test_task)
             return
 
         generate_crosscorr_job_file(tasks, self.config)
-        submit_dsq_array_job(self.config)
-
+        job_id = submit_dsq_array_job(self.config)
+        submit_dsq_array_job(job_id)
+        self.combine_and_save_shuffled_results()
 
 
     def compute_shuffled_crosscorrelations_for_single_run(self, session, run, a1, b1, a2, b2, period_type="full"):
         """
-        Computes shuffled cross-correlations for a single session/run and agent-behavior pair.
+        Computes shuffled cross-correlations for a single session/run and saves to a temp file.
 
         Args:
             session (str): Session name.
@@ -167,7 +174,6 @@ class CrossCorrCalculator:
             a2, b2 (str): Agent 2 and their behavior type.
             period_type (str): One of "full", "interactive", or "non_interactive".
         """
-
         try:
             df1 = self.fixation_detector.get_binary_vector_df(b1)
             df2 = self.fixation_detector.get_binary_vector_df(b2)
@@ -187,13 +193,10 @@ class CrossCorrCalculator:
         if v1 is None or v2 is None:
             return
 
-        if period_type == "full":
-            periods = [(0, len(v1) - 1)]
-        else:
-            inter_df = self.interactivity_detector.load_interactivity_periods()
-            periods = _get_periods_for_run(inter_df, session, run, period_type, len(v1))
-            if not periods:
-                return
+        inter_df = self.interactivity_detector.load_interactivity_periods() if period_type != "full" else None
+        periods = [(0, len(v1) - 1)] if period_type == "full" else _get_periods_for_run(inter_df, session, run, period_type, len(v1))
+        if periods is None or len(periods) == 0:
+            return
 
         all_rows = []
         for start, stop in periods:
@@ -203,38 +206,38 @@ class CrossCorrCalculator:
                 continue
 
             try:
-                logger.info(f"Generating {self.config.num_shuffles} shuffled vectors for {a1}-{b1} vs {a2}-{b2} | {session}-run{run} [{period_type}]")
-                shuffled_vecs = _generate_shuffled_vectors_for_run(
+                logger.info(f"Generating {self.config.num_shuffles} shuffled vectors for {a1}-{b1} and {a2}-{b2} | {session}-run{run} [{period_type}]")
+
+                shuffled_seg1 = _generate_shuffled_vectors_for_run(
                     seg1, run_length=len(seg1),
                     num_shuffles=self.config.num_shuffles,
                     num_cpus=self.config.num_cpus,
                     stringent=self.config.make_shuffle_stringent,
                 )
+                shuffled_seg2 = _generate_shuffled_vectors_for_run(
+                    seg2, run_length=len(seg2),
+                    num_shuffles=self.config.num_shuffles,
+                    num_cpus=self.config.num_cpus,
+                    stringent=self.config.make_shuffle_stringent,
+                )
             except Exception as e:
-                logger.warning(f"Shuffling failed for {session}-{run} | {a1} {b1}: {e}")
+                logger.warning(f"Shuffling failed for {session}-{run} | {a1}-{b1} vs {a2}-{b2}: {e}")
                 continue
 
-            corrs = Parallel(n_jobs=self.config.num_cpus)(
+            results = Parallel(n_jobs=self.config.num_cpus)(
                 delayed(_compute_normalized_crosscorr)(
-                    s_v1, seg2,
+                    s1, s2,
                     max_lag=None,
                     normalize=self.config.normalize,
                     use_energy_norm=self.config.use_energy_norm
-                )[1]
-                for s_v1 in shuffled_vecs
+                )
+                for s1, s2 in zip(shuffled_seg1, shuffled_seg2)
             )
 
-            lags, _ = _compute_normalized_crosscorr(
-                seg1, seg2,
-                max_lag=None,
-                normalize=self.config.normalize,
-                use_energy_norm=self.config.use_energy_norm
-            )
-
-
-            corrs = np.stack(corrs)
-            mean_corr = np.mean(corrs, axis=0)
-            std_corr = np.std(corrs, axis=0)
+            lags, _ = results[0]
+            corr_values = np.stack([corr for _, corr in results])
+            mean_corr = np.mean(corr_values, axis=0)
+            std_corr = np.std(corr_values, axis=0)
 
             df = pd.DataFrame({
                 "session_name": session,
@@ -252,15 +255,52 @@ class CrossCorrCalculator:
 
         if all_rows:
             out_df = pd.concat(all_rows, ignore_index=True)
-            name = f"{a1}_{b1}__vs__{a2}_{b2}_shuffled"
+            name = f"{a1}_{b1}__vs__{a2}_{b2}"
             if period_type != "full":
                 name += f"_{period_type}"
-            
-            save_dir = self.config.crosscorr_shuffled_output_dir
-            save_dir.mkdir(parents=True, exist_ok=True)
-            out_path = save_dir / f"{name}__{session}__run{run}.pkl"
+
+            temp_dir = self.config.crosscorr_shuffled_temp_dir
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            out_path = temp_dir / f"{name}__{session}__run{run}.pkl"
             out_df.to_pickle(out_path)
-            logger.info(f"Saved shuffled cross-correlation result to: {out_path}")
+            logger.info(f"Saved TEMP shuffled result: {out_path}")
+
+
+    def combine_and_save_shuffled_results(self):
+        """
+        Combines all temp run-level shuffled crosscorr files into one file per 
+        (agent1, behavior1, agent2, behavior2, period_type) and saves to output.
+        Temp files are removed after saving.
+        """
+        temp_dir = self.config.crosscorr_shuffled_temp_dir
+        output_dir = self.config.crosscorr_shuffled_output_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        grouped_paths: Dict[str, List[str]] = {}
+        for path in glob(str(temp_dir / "*.pkl")):
+            filename = os.path.basename(path)
+            parts = filename.split("__")
+
+            # Extract group key
+            if parts[1] in {"full", "interactive", "non_interactive"}:
+                group_key = f"{parts[0]}__{parts[1]}"
+            else:
+                group_key = parts[0]
+
+            grouped_paths.setdefault(group_key, []).append(path)
+
+        for group_key, file_list in grouped_paths.items():
+            dfs = [pd.read_pickle(f) for f in file_list]
+            combined = pd.concat(dfs, ignore_index=True)
+            out_path = output_dir / f"{group_key}.pkl"
+            combined.to_pickle(out_path)
+            logger.info(f"Saved COMBINED shuffled cross-correlation: {out_path}")
+
+            # Clean up
+            for f in file_list:
+                os.remove(f)
+                logger.debug(f"Deleted temp file: {f}")
+
 
 
     def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:
@@ -283,7 +323,7 @@ def _process_one_session_run_crosscorr(session, run, run_df, a1, b1, a2, b2, per
         periods = [(0, len(v1) - 1)]
     else:
         periods = _get_periods_for_run(inter_df, session, run, period_type, len(v1))
-        if not periods:
+        if periods is None or len(periods) == 0:
             return []
 
     return _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2, period_type, config)

@@ -59,7 +59,7 @@ def main():
         else:
             raise NotImplementedError("Only shuffled mode is supported for single-run jobs.")
     else:
-        calculator.compute_crosscorrelations(by_interactivity_period=False)
+        # calculator.compute_crosscorrelations(by_interactivity_period=False)
         calculator.compute_crosscorrelations(by_interactivity_period=True)
         calculator.compute_shuffled_crosscorrelations(by_interactivity_period=False)
         calculator.compute_shuffled_crosscorrelations(by_interactivity_period=True)

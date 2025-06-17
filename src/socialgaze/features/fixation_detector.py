@@ -55,10 +55,9 @@ class FixationDetector:
             tasks = [random.choice(tasks)]
 
         generate_fixation_job_file(tasks=tasks, config=config)
-
         job_id = submit_dsq_array_job(config=config)
-
         track_job_completion(job_id)
+        
         self._load_fixation_and_saccade_results(tasks)
 
 

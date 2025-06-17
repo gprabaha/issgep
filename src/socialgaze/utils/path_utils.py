@@ -264,8 +264,10 @@ def get_interactivity_df_path(config, fixation_type='face') -> Path:
 def get_crosscorr_job_file_path(config) -> Path:
     return config.project_root / "jobs" / "scripts" / "crosscorr_jobs.tsv"
 
+
 def get_crosscorr_worker_script_path(project_root: Path) -> Path:
     return project_root / "scripts" / "behav_analysis" / "04_inter_agent_crosscorr.py"
+
 
 def get_crosscorr_output_path(config, comparison_name: str) -> Path:
     """
@@ -397,6 +399,7 @@ def get_saccade_job_result_path(temp_dir: Path, session: str, run: str, agent: s
         Path: Path to the saccade .pkl file.
     """
     return Path(temp_dir) / f"saccades_{session}_{run}_{agent}.pkl"
+
 
 def get_job_out_dir(project_root: Path) -> Path:
     """
