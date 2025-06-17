@@ -304,10 +304,10 @@ class FixationDetector:
         """
         path = self.binary_vector_paths.get(behavior_type)
         if path is None:
-            logger.info(f"Binary vector path for {behavior_type} not found in cache, constructing path and then loading")
             path = get_behav_binary_vector_path(self.config, behavior_type)
         if not path.exists():
             raise FileNotFoundError(f"Binary vector file for {behavior_type} not found at: {path}")
+        logger.info(f"Loading {behavior_type} binary vector dataframe from {path}")
         return load_df_from_pkl(path)
 
 

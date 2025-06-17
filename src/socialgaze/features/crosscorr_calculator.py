@@ -22,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 class CrossCorrCalculator:
+    """
+    Computes cross-correlations and shuffled cross-correlations between binary behavioral vectors 
+    from two agents across experimental sessions and runs.
+
+    Attributes:
+        config (CrossCorrConfig): Configuration object containing parameters and paths.
+        fixation_detector (FixationDetector): Provides access to binary fixation vectors.
+        interactivity_detector (Optional[InteractivityDetector]): Provides interactivity period data.
+    """
+
     def __init__(
         self,
         config: CrossCorrConfig,
@@ -33,6 +43,15 @@ class CrossCorrCalculator:
         self.interactivity_detector = interactivity_detector
 
     def compute_crosscorrelations(self, by_interactivity_period: bool = False):
+        """
+        Computes cross-correlations for each session/run and agent-behavior pair.
+
+        Args:
+            by_interactivity_period (bool): If True, computes separate cross-correlations for 
+                                            interactive and non-interactive periods using the
+                                            InteractivityDetector. Otherwise computes over full duration.
+        """
+
         if by_interactivity_period:
             assert self.interactivity_detector is not None, "InteractivityDetector must be provided."
             logger.info("Computing cross-correlations by interactivity period...")
@@ -98,9 +117,15 @@ class CrossCorrCalculator:
 
     def compute_shuffled_crosscorrelations(self, by_interactivity_period: bool = False):
         """
-        If `run_single_test_case` is True in config, runs one task from the full set.
-        Otherwise submits a SLURM job array.
+        Prepares and submits a SLURM job array to compute shuffled cross-correlations
+        for all session/run and agent-behavior combinations.
+
+        If config.run_single_test_case is True, only one randomly selected task is executed locally.
+        
+        Args:
+            by_interactivity_period (bool): Whether to compute per-period (interactive vs. non-interactive).
         """
+
         logger.info(f"Preparing shuffled cross-correlation job array "
                     f"({'by interactivity' if by_interactivity_period else 'full'})...")
 
@@ -132,6 +157,17 @@ class CrossCorrCalculator:
 
 
     def compute_shuffled_crosscorrelations_for_single_run(self, session, run, a1, b1, a2, b2, period_type="full"):
+        """
+        Computes shuffled cross-correlations for a single session/run and agent-behavior pair.
+
+        Args:
+            session (str): Session name.
+            run (int): Run number.
+            a1, b1 (str): Agent 1 and their behavior type.
+            a2, b2 (str): Agent 2 and their behavior type.
+            period_type (str): One of "full", "interactive", or "non_interactive".
+        """
+
         try:
             df1 = self.fixation_detector.get_binary_vector_df(b1)
             df2 = self.fixation_detector.get_binary_vector_df(b2)
@@ -167,6 +203,7 @@ class CrossCorrCalculator:
                 continue
 
             try:
+                logger.info(f"Generating {self.config.num_shuffles} shuffled vectors for {a1}-{b1} vs {a2}-{b2} | {session}-run{run} [{period_type}]")
                 shuffled_vecs = _generate_shuffled_vectors_for_run(
                     seg1, run_length=len(seg1),
                     num_shuffles=self.config.num_shuffles,
@@ -183,14 +220,21 @@ class CrossCorrCalculator:
                     max_lag=None,
                     normalize=self.config.normalize,
                     use_energy_norm=self.config.use_energy_norm
-                )[1]  # We only need the correlation values
+                )[1]
                 for s_v1 in shuffled_vecs
             )
+
+            lags, _ = _compute_normalized_crosscorr(
+                seg1, seg2,
+                max_lag=None,
+                normalize=self.config.normalize,
+                use_energy_norm=self.config.use_energy_norm
+            )
+
 
             corrs = np.stack(corrs)
             mean_corr = np.mean(corrs, axis=0)
             std_corr = np.std(corrs, axis=0)
-            lags = _compute_normalized_crosscorr(seg1, seg2)[0]
 
             df = pd.DataFrame({
                 "session_name": session,
@@ -213,11 +257,10 @@ class CrossCorrCalculator:
                 name += f"_{period_type}"
             
             save_dir = self.config.crosscorr_shuffled_output_dir
-            os.makedirs(save_dir, exist_ok=True)
+            save_dir.mkdir(parents=True, exist_ok=True)
             out_path = save_dir / f"{name}__{session}__run{run}.pkl"
             out_df.to_pickle(out_path)
-            logger.info(f"Saved shuffled crosscorr: {out_path}")
-
+            logger.info(f"Saved shuffled cross-correlation result to: {out_path}")
 
 
     def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:
@@ -226,6 +269,10 @@ class CrossCorrCalculator:
             raise FileNotFoundError(f"Cross-correlation result not found at: {path}")
         return load_df_from_pkl(path)
 
+
+# ------------------------
+# Cross-correlation helpers
+# ------------------------
 
 def _process_one_session_run_crosscorr(session, run, run_df, a1, b1, a2, b2, period_type, inter_df, config):
     v1, v2 = _get_vectors_for_run(run_df, a1, b1, a2, b2)
@@ -243,14 +290,15 @@ def _process_one_session_run_crosscorr(session, run, run_df, a1, b1, a2, b2, per
 
 
 def _get_vectors_for_run(run_df, a1, b1, a2, b2):
-    try:
-        agent_data = {
-            (row["agent"], row["behavior_type"]): row["binary_vector"]
-            for _, row in run_df.iterrows()
-        }
-        return agent_data[(a1, b1)], agent_data[(a2, b2)]
-    except KeyError:
+    agent_data = {
+        (row["agent"], row["behavior_type"]): row["binary_vector"]
+        for _, row in run_df.iterrows()
+    }
+    if (a1, b1) not in agent_data or (a2, b2) not in agent_data:
+        logger.warning(f"Missing binary vector for {a1}-{b1} or {a2}-{b2} in run_df.")
         return None, None
+    return agent_data[(a1, b1)], agent_data[(a2, b2)]
+
 
 def _get_periods_for_run(inter_df, session, run, period_type, full_len):
     run_periods = inter_df[
@@ -261,6 +309,7 @@ def _get_periods_for_run(inter_df, session, run, period_type, full_len):
         return []
     inter = run_periods[["start", "stop"]].values
     return inter if period_type == "interactive" else _compute_complement_periods(inter, [(0, full_len - 1)])
+
 
 def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2, period_type, config):
     all_rows = []
@@ -289,9 +338,10 @@ def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2
         all_rows.append(rows)
     return all_rows
 
+
 def _save_crosscorr_df(df, comparison_name, config):
     path = get_crosscorr_output_path(config, comparison_name)
-    os.makedirs(path.parent, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     logger.info(f"Saving {comparison_name} dataframe.")
     save_df_to_pkl(df, path)
 
@@ -341,6 +391,12 @@ def _compute_complement_periods(included: np.ndarray, total: List[tuple]) -> Lis
     return complement
 
 
+
+# ------------------------
+# Shuffling-related helpers
+# ------------------------
+
+
 def _generate_shuffled_vectors_for_run(
     original_vector: np.ndarray,
     run_length: int,
@@ -348,6 +404,20 @@ def _generate_shuffled_vectors_for_run(
     num_cpus: int,
     stringent: bool
 ) -> List[np.ndarray]:
+    """
+    Generates shuffled versions of a binary vector by preserving fixation durations 
+    and redistributing them within the run length.
+
+    Args:
+        original_vector (np.ndarray): Binary vector (1 for fixation, 0 for no fixation).
+        run_length (int): Total length of the run.
+        num_shuffles (int): Number of shuffled vectors to generate.
+        num_cpus (int): Number of CPUs to use for parallel generation.
+        stringent (bool): If True, preserves inter-fixation intervals more strictly.
+
+    Returns:
+        List[np.ndarray]: List of shuffled binary vectors.
+    """
     ones = np.where(original_vector == 1)[0]
     if len(ones) == 0:
         return [np.zeros(run_length, dtype=int) for _ in range(num_shuffles)]
