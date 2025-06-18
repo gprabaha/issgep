@@ -169,15 +169,25 @@ class CrossCorrCalculator:
 
         Args:
             session (str): Session name.
-            run (int): Run number.
+            run (str or int): Run number (will be coerced to str).
             a1, b1 (str): Agent 1 and their behavior type.
             a2, b2 (str): Agent 2 and their behavior type.
             period_type (str): One of "full", "interactive", or "non_interactive".
         """
+        # --- Normalize all input arguments ---
+        session = str(session).strip()
+        run = str(run).strip()
+        a1 = str(a1).lower().strip()
+        b1 = str(b1).strip()
+        a2 = str(a2).lower().strip()
+        b2 = str(b2).strip()
+
         logger.info(
             f"Computing shuffled crosscorr: session={session}, run={run}, "
             f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}"
         )
+
+        # --- Try loading binary vectors ---
         try:
             df1 = self.fixation_detector.get_binary_vector_df(b1)
             df2 = self.fixation_detector.get_binary_vector_df(b2)
@@ -185,14 +195,13 @@ class CrossCorrCalculator:
             logger.warning(f"Missing binary vector: {b1} or {b2}")
             return
 
-        # Normalize inputs
-        a1 = a1.lower().strip()
-        a2 = a2.lower().strip()
-        session = session.strip()
-        
-        df1["run_number"] = pd.to_numeric(df1["run_number"], errors="coerce")
-        df2["run_number"] = pd.to_numeric(df2["run_number"], errors="coerce")
+        # --- Normalize DataFrame columns ---
+        for df in [df1, df2]:
+            df["agent"] = df["agent"].astype(str).str.lower().str.strip()
+            df["session_name"] = df["session_name"].astype(str).str.strip()
+            df["run_number"] = df["run_number"].astype(str).str.strip()
 
+        # --- Filter for matching rows ---
         df1 = df1[(df1["agent"] == a1) & (df1["session_name"] == session) & (df1["run_number"] == run)]
         df2 = df2[(df2["agent"] == a2) & (df2["session_name"] == session) & (df2["run_number"] == run)]
 
@@ -205,11 +214,15 @@ class CrossCorrCalculator:
         if v1 is None or v2 is None:
             return
 
+        # --- Get interactivity periods if needed ---
         inter_df = self.interactivity_detector.load_interactivity_periods() if period_type != "full" else None
-        periods = [(0, len(v1) - 1)] if period_type == "full" else _get_periods_for_run(inter_df, session, run, period_type, len(v1))
+        periods = [(0, len(v1) - 1)] if period_type == "full" else _get_periods_for_run(
+            inter_df, session, run, period_type, len(v1)
+        )
         if periods is None or len(periods) == 0:
             return
 
+        # --- Loop through periods and compute shuffled correlations ---
         all_rows = []
         for start, stop in periods:
             seg1 = v1[start:stop + 1]
@@ -235,7 +248,8 @@ class CrossCorrCalculator:
             except Exception as e:
                 logger.warning(f"Shuffling failed for {session}-{run} | {a1}-{b1} vs {a2}-{b2}: {e}")
                 continue
-
+            
+            logger.info(f"Computing cross-correlation for for {a1}-{b1} and {a2}-{b2} | {session}-run{run} [{period_type}]")
             results = Parallel(n_jobs=self.config.num_cpus)(
                 delayed(_compute_normalized_crosscorr)(
                     s1, s2,
@@ -258,24 +272,29 @@ class CrossCorrCalculator:
                 "agent2": a2,
                 "behavior1": b1,
                 "behavior2": b2,
-                "lag": lags,
-                "crosscorr_mean": mean_corr,
-                "crosscorr_std": std_corr,
+                "lag": [lags],
+                "crosscorr_mean": [mean_corr],
+                "crosscorr_std": [std_corr],
                 "period_type": period_type
             })
             all_rows.append(df)
 
+            pdb.set_trace()  # Debugging breakpoint
+
+        # --- Save temporary results ---
         if all_rows:
             out_df = pd.concat(all_rows, ignore_index=True)
             name = f"{a1}_{b1}__vs__{a2}_{b2}"
             if period_type != "full":
                 name += f"_{period_type}"
+            logger.info(f"Resultant dataframe for {name}:\n{out_df.head()}")
 
             temp_dir = self.config.crosscorr_shuffled_temp_dir
             temp_dir.mkdir(parents=True, exist_ok=True)
             out_path = temp_dir / f"{name}__{session}__run{run}.pkl"
             out_df.to_pickle(out_path)
             logger.info(f"Saved TEMP shuffled result: {out_path}")
+
 
 
     def combine_and_save_shuffled_results(self):

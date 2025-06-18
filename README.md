@@ -48,7 +48,7 @@ The repository follows a modular structure:
 
 ---
 
-## 🧩 How to Add New Functionality
+## How to Add New Functionality
 
 ### Functions
 

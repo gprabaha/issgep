@@ -37,7 +37,7 @@ class CrossCorrConfig(FixationConfig):
         self.use_energy_norm: bool = True
         self.make_shuffle_stringent: bool = True
         self.num_shuffles: int = 500
-        self.run_single_test_case: bool = False
+        self.run_single_test_case: bool = True
 
         # === Output paths ===
         self.crosscorr_shuffled_output_dir = get_crosscorr_shuffled_output_dir(self)

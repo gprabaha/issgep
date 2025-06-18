@@ -203,6 +203,14 @@ class BaseConfig:
             self.runs_by_session,
             ephys_days_and_monkeys_df
         )
+        logger.info(f"Extracted sessions with ephys data: {self.session_names}")
+        # Save to disk
+        session_df = pd.DataFrame([
+            {"session_name": s, "run_number": run}
+            for s in self.session_names
+            for run in self.runs_by_session[s]
+        ])
+        session_df.to_pickle(self.processed_data_dir / "discovered_sessions_and_runs.pkl")
 
     # -----------------------------
     # Save / load
