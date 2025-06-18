@@ -279,7 +279,6 @@ class PCProjector:
         else:
             category_order = base_categories
 
-
         pop_list = []
         for unit_uuid in unit_uuids:
             unit_frs = []
@@ -303,7 +302,6 @@ class PCProjector:
 
         pop_mat = np.stack(pop_list, axis=0).T
         return pop_mat, unit_uuids, category_order, sample_metadata
-
 
 
     def _reshape_projection_as_timeseries_dataframe(
@@ -406,13 +404,14 @@ def compute_per_pc_explained_variance_per_category(pca, region_df, unit_order, c
     For each category, computes variance explained by each PC individually.
 
     Returns:
-        Dict[category -> List[variance_explained_per_pc]]
+        Dict[str, List[float]]: category -> list of variance explained per PC
     """
     category_pc_var_explained = {}
     components = pca.components_  # shape: (n_components, n_features)
+    n_components = pca.n_components_
 
     for cat in category_order:
-        # Step 1: Extract and shape firing rate matrix
+        # Step 1: Extract and shape firing rate matrix (n_timepoints x n_units)
         X_cat = []
         for unit_uuid in unit_order:
             row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
@@ -420,25 +419,29 @@ def compute_per_pc_explained_variance_per_category(pca, region_df, unit_order, c
                 raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
             fr = np.array(row.iloc[0]["avg_firing_rate"])
             X_cat.append(fr)
-        X_cat = np.stack(X_cat, axis=1)  # shape: (n_timepoints, n_units)
+        X_cat = np.stack(X_cat, axis=1)  # shape: (T, N)
 
-        # Step 2: Mean-center
-        X_mean = np.mean(X_cat, axis=0, keepdims=True)
-        X_centered = X_cat - X_mean
-        total_var = np.sum(X_centered ** 2)
+        # Step 2: Project using PCA (which uses internal mean-centering)
+        X_proj = pca.transform(X_cat)  # shape: (T, n_components)
 
-        # Step 3: Project
-        X_proj = pca.transform(X_centered)  # shape: (n_timepoints, n_components)
+        # Step 3: Total variance of original data
+        X_cat_centered = X_cat - pca.mean_ # subtract pca mean which was used for centering
+        total_var = np.sum(X_cat_centered ** 2) + np.finfo(float).eps  # avoid division by zero
 
-        # Step 4: Reconstruct from individual PCs
+        # Step 4: Reconstruct using individual PCs and compute explained variance
         pc_var_explained = []
         for i in range(pca.n_components_):
-            pc_vec = components[i]  # shape: (n_features,)
-            pc_proj = X_proj[:, i].reshape(-1, 1)  # shape: (n_timepoints, 1)
-            X_recon = pc_proj @ pc_vec.reshape(1, -1)  # shape: (n_timepoints, n_features)
-            residual = X_centered - X_recon
+            # Keep only i-th PC
+            X_proj_i = np.zeros_like(X_proj)
+            X_proj_i[:, i] = X_proj[:, i]
+
+            # Reconstruct using inverse_transform
+            X_recon_i = pca.inverse_transform(X_proj_i)
+
+            # Compute explained variance
+            residual = X_cat - X_recon_i
             residual_var = np.sum(residual ** 2)
-            explained = 1 - residual_var / (total_var + np.finfo(float).eps)
+            explained = 1 - residual_var / total_var
             pc_var_explained.append(explained)
 
         category_pc_var_explained[cat] = pc_var_explained

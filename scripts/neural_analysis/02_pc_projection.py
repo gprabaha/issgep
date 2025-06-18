@@ -64,6 +64,9 @@ def main():
         interactivity_detector=interactivity_detector,
     )
 
+    allowed_fits = {"fit_avg_face_obj", "fit_int_non_int_face_obj"}
+    allowed_transforms = {"transform_avg_face_obj", "transform_int_non_int_face_obj"}
+    
     try:
         logger.info("Creating PC projector...")
         pc_projector = PCProjector(config=pca_config, psth_extractor=psth_extractor)
@@ -74,55 +77,61 @@ def main():
             run_joblib_parallel(
                 delayed(pc_projector.fit)(fit_spec)
                 for fit_spec in FIT_SPECS
+                if fit_spec.name in allowed_fits
             )
 
             logger.info("Running PCA projections in parallel...")
             run_joblib_parallel(
                 delayed(pc_projector.project)(fit_spec.name, transform_spec)
                 for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS)
+                if fit_spec.name in allowed_fits and transform_spec.name in allowed_transforms
             )
         else:
             for fit_spec in FIT_SPECS:
+                if fit_spec.name not in allowed_fits:
+                    continue
                 logger.info(f"Running PCA fit: {fit_spec.name}")
                 pc_projector.fit(fit_spec)
 
             for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
+                if fit_spec.name not in allowed_fits or transform_spec.name not in allowed_transforms:
+                    continue
                 logger.info(f"Running PCA projection: fit={fit_spec.name} | transform={transform_spec.name}")
                 pc_projector.project(fit_spec_name=fit_spec.name, transform_spec=transform_spec)
 
         logger.info("PCA projection script completed successfully.")
 
-        # Compare trajectories
-        logger.info("\n--- Comparing category trajectories ---")
+        # # Compare trajectories
+        # logger.info("\n--- Comparing category trajectories ---")
 
-        # Define allowed spec names
-        allowed_fits = {"fit_avg_face_obj", "fit_int_non_int_face_obj"}
-        allowed_transforms = {"transform_avg_face_obj", "transform_int_non_int_face_obj"}
+        # # Define allowed spec names
+        # allowed_fits = {"fit_avg_face_obj", "fit_int_non_int_face_obj"}
+        # allowed_transforms = {"transform_avg_face_obj", "transform_int_non_int_face_obj"}
 
-        for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
-            if (
-                fit_spec.name not in allowed_fits
-                or transform_spec.name not in allowed_transforms
-            ):
-                continue
+        # for fit_spec, transform_spec in product(FIT_SPECS, TRANSFORM_SPECS):
+        #     if (
+        #         fit_spec.name not in allowed_fits
+        #         or transform_spec.name not in allowed_transforms
+        #     ):
+        #         continue
 
-            key = f"{fit_spec.name}__{transform_spec.name}"
-            available_regions = pc_projector.get_available_fit_transform_region_keys().get(key, [])
+        #     key = f"{fit_spec.name}__{transform_spec.name}"
+        #     available_regions = pc_projector.get_available_fit_transform_region_keys().get(key, [])
 
-            for region in available_regions:
-                logger.info(f"\nComparing trajectories for: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")
-                try:
-                    results = pc_projector.compare_category_trajectories(fit_spec.name, transform_spec.name, region)
-                    for res in results:
-                        print(
-                            f"{res['category_1']} vs {res['category_2']} | "
-                            f"Euclidean Distance: {res['euclidean_distance']:.4f} | "
-                            f"Angle: {res['vector_angle_deg']:.2f}° | "
-                            f"Trajectory Length diff: {res['trajectory_length_diff']:.4f} | "
-                            f"Procrustes Disparity: {res['procrustes_disparity']:.4f}"
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to compare trajectories for {key} in region {region}: {e}")
+        #     for region in available_regions:
+        #         logger.info(f"\nComparing trajectories for: fit={fit_spec.name}, transform={transform_spec.name}, region={region}")
+        #         try:
+        #             results = pc_projector.compare_category_trajectories(fit_spec.name, transform_spec.name, region)
+        #             for res in results:
+        #                 print(
+        #                     f"{res['category_1']} vs {res['category_2']} | "
+        #                     f"Euclidean Distance: {res['euclidean_distance']:.4f} | "
+        #                     f"Angle: {res['vector_angle_deg']:.2f}° | "
+        #                     f"Trajectory Length diff: {res['trajectory_length_diff']:.4f} | "
+        #                     f"Procrustes Disparity: {res['procrustes_disparity']:.4f}"
+        #                 )
+        #         except Exception as e:
+        #             logger.warning(f"Failed to compare trajectories for {key} in region {region}: {e}")
 
     except Exception as e:
         logger.exception(f"PCA projection failed: {e}")

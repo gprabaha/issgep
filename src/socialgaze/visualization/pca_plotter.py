@@ -253,7 +253,6 @@ class PCAPlotter:
                         ax_var.set_ylabel("Explained Variance")
                         ax_var.set_xticks(x + width * (len(cats)-1)/2)
                         ax_var.set_xticklabels([f"PC{i+1}" for i in range(n_pcs)], rotation=45)
-                        ax_var.set_ylim(0, 1)
                         ax_var.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
 
 
