@@ -5,7 +5,7 @@ This repository contains the data processing and analysis pipeline used to study
 
 ---
 
-## 🧠 Project Scope
+## Project Scope
 
 We focus on understanding how social gaze behavior unfolds over time between interacting agents and how neural signals track these interactions. Our pipeline allows:
 
@@ -17,7 +17,7 @@ We focus on understanding how social gaze behavior unfolds over time between int
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### 1. Clone and Set Up the Environment
 
@@ -36,7 +36,7 @@ python scripts/behav_analysis/01_fixation_detection.py --session 20230718 --run 
 
 ---
 
-## 🗂️ Organization Overview
+## Organization Overview
 
 The repository follows a modular structure:
 
@@ -50,7 +50,7 @@ The repository follows a modular structure:
 
 ## 🧩 How to Add New Functionality
 
-### ✅ Functions
+### Functions
 
 * Place utility functions in `src/socialgaze/utils/` when they are general-purpose.
 * Use clear, testable inputs and outputs — avoid using or modifying global state.
@@ -62,7 +62,7 @@ def get_fixation_duration(fixation):
     return fixation["end_time"] - fixation["start_time"]
 ```
 
-### ✅ Classes
+### Classes
 
 * Add new classes to `src/socialgaze/features/` or `src/socialgaze/data/` depending on their role.
 * Inherit from `BaseConfig` for config-aware tools, or from a relevant parent class like `FixationDetector`.
@@ -86,7 +86,7 @@ class NewAnalysisTool(BaseConfig):
             pickle.dump(self.results, f)
 ```
 
-### ✅ Configs
+### Configs
 
 * All config classes live in `src/socialgaze/config/` and inherit from `BaseConfig`.
 * Create a new file like `new_feature_config.py` and define your config class there.
@@ -102,7 +102,7 @@ class NewFeatureConfig(BaseConfig):
 
 ---
 
-## 🧪 Writing Analysis Scripts
+## Writing Analysis Scripts
 
 * Scripts go into the relevant subfolder of `scripts/`
 
@@ -130,7 +130,7 @@ if __name__ == "__main__":
 
 ---
 
-## 📊 Outputs and Reproducibility
+## Outputs and Reproducibility
 
 * All major outputs are stored under `data/processed/` and `outputs/`
 * Binary vectors, spike data, and fixation events are serialized using `pickle`
@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
 ---
 
-## ⚙️ HPC Execution
+## HPC Execution
 
 To run jobs on SLURM, use the job scripts in `jobs/scripts/`. Each analysis stage has a paired job script and job array file. Example:
 
