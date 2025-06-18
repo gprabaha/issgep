@@ -94,10 +94,14 @@ class PCProjector:
                 n_components=pca.n_components_,
                 transform_spec=transform_spec,
             )
-
+            per_pc_explained = compute_per_pc_explained_variance_per_category(
+                pca, region_df, unit_order, category_order
+            )
+            
             # Store and save
             self.pc_projection_dfs[key][region] = proj_df
             self.pc_projection_meta[key]["category_order"] = category_order
+            self.pc_projection_meta[key][f"{region}_category_pc_var_explained"] = per_pc_explained
 
             save_df_to_pkl(
                 proj_df,
@@ -397,32 +401,79 @@ class PCProjector:
         return load_df_from_pkl(path)
 
 
-def mean_vector_angle(h1: np.ndarray, h2: np.ndarray) -> float:
-
-    # !! Try mean shifting the trajectories to find the angles between them
-
+def compute_per_pc_explained_variance_per_category(pca, region_df, unit_order, category_order):
     """
-    Compute the mean angle (in radians) between corresponding vectors in h1 and h2.
-
-    Args:
-        h1 (np.ndarray): Array of shape (T, N)
-        h2 (np.ndarray): Array of shape (T, N)
+    For each category, computes variance explained by each PC individually.
 
     Returns:
-        float: Mean angle (in radians) between corresponding vectors
+        Dict[category -> List[variance_explained_per_pc]]
+    """
+    category_pc_var_explained = {}
+    components = pca.components_  # shape: (n_components, n_features)
+
+    for cat in category_order:
+        # Step 1: Extract and shape firing rate matrix
+        X_cat = []
+        for unit_uuid in unit_order:
+            row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
+            if row.shape[0] != 1:
+                raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
+            fr = np.array(row.iloc[0]["avg_firing_rate"])
+            X_cat.append(fr)
+        X_cat = np.stack(X_cat, axis=1)  # shape: (n_timepoints, n_units)
+
+        # Step 2: Mean-center
+        X_mean = np.mean(X_cat, axis=0, keepdims=True)
+        X_centered = X_cat - X_mean
+        total_var = np.sum(X_centered ** 2)
+
+        # Step 3: Project
+        X_proj = pca.transform(X_centered)  # shape: (n_timepoints, n_components)
+
+        # Step 4: Reconstruct from individual PCs
+        pc_var_explained = []
+        for i in range(pca.n_components_):
+            pc_vec = components[i]  # shape: (n_features,)
+            pc_proj = X_proj[:, i].reshape(-1, 1)  # shape: (n_timepoints, 1)
+            X_recon = pc_proj @ pc_vec.reshape(1, -1)  # shape: (n_timepoints, n_features)
+            residual = X_centered - X_recon
+            residual_var = np.sum(residual ** 2)
+            explained = 1 - residual_var / (total_var + np.finfo(float).eps)
+            pc_var_explained.append(explained)
+
+        category_pc_var_explained[cat] = pc_var_explained
+
+    return category_pc_var_explained
+
+
+def mean_vector_angle(h1: np.ndarray, h2: np.ndarray) -> float:
+    """
+    Compute the mean angle (in radians) between corresponding vectors in h1 and h2.
+    First mean-shifts both trajectories across time.
+
+    Args:
+        h1, h2 (np.ndarray): shape (T, N)
+
+    Returns:
+        float: mean angular difference (radians)
     """
     if h1.shape != h2.shape:
         raise ValueError("h1 and h2 must have the same shape")
 
-    dot_products = np.sum(h1 * h2, axis=1)
-    norms_h1 = np.linalg.norm(h1, axis=1)
-    norms_h2 = np.linalg.norm(h2, axis=1)
+    # Mean shift along time (axis 0)
+    h1_centered = h1 - h1.mean(axis=0, keepdims=True)
+    h2_centered = h2 - h2.mean(axis=0, keepdims=True)
+
+    dot_products = np.sum(h1_centered * h2_centered, axis=1)
+    norms_h1 = np.linalg.norm(h1_centered, axis=1)
+    norms_h2 = np.linalg.norm(h2_centered, axis=1)
 
     denom = norms_h1 * norms_h2
-    denom[denom == 0] = np.finfo(float).eps  # Avoid division by zero
+    denom[denom == 0] = np.finfo(float).eps
 
     cos_sim = dot_products / denom
     cos_sim = np.clip(cos_sim, -1.0, 1.0)
 
     angles = np.arccos(cos_sim)
     return np.mean(angles)
+

@@ -112,9 +112,11 @@ def main():
                 try:
                     df, _ = projector.get_projection(fit_spec.name, transform_spec.name, region)
                     results = projector.compare_category_trajectories(fit_spec.name, transform_spec.name, region)
+                    _, meta = projector.get_projection(fit_spec.name, transform_spec.name, region)
                     comparison_dict[transform_spec.name][region] = {
                         "projection_df": df,
-                        "comparison_metrics": results
+                        "comparison_metrics": results,
+                        "projection_meta": meta
                     }
                     region_set.add(region)
                 except Exception as e:

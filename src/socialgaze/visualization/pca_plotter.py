@@ -2,6 +2,7 @@
 
 import os
 import pandas as pd
+import numpy as np
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -157,10 +158,17 @@ class PCAPlotter:
         )
         os.makedirs(save_base, exist_ok=True)
 
-        metric_names = ["euclidean_distance", "vector_angle_deg", "trajectory_length_diff", "procrustes_disparity"]
-        n_metrics = len(metric_names)
+        metric_names = [
+            "euclidean_distance", 
+            "vector_angle_deg", 
+            "trajectory_length_diff", 
+            "procrustes_disparity"
+        ]
         transform_names = sorted(comparison_data.keys())
-        n_cols = 1 + n_metrics
+        plot_var_expl = True  # toggle
+        n_extra = 1 if plot_var_expl else 0
+        n_cols = 1 + len(metric_names) + n_extra
+
 
         for region in regions:
             fig, axes = [], []
@@ -217,6 +225,37 @@ class PCAPlotter:
                     ax_metric.bar(range(len(values)), values, tick_label=labels)
                     ax_metric.set_title(metric_name.replace("_", " ").title())
                     ax_metric.tick_params(axis='x', labelrotation=45)
+
+                # --- Variance explained per PC (per category) ---
+                if plot_var_expl:
+                    ax_var = axes[row_idx][-1]
+                    meta = transform_data["projection_meta"]
+                    var_expl_key = f"{region}_category_pc_var_explained"
+                    if var_expl_key in meta:
+                        per_cat_pc_var = meta[var_expl_key]  # dict: cat -> list of floats
+                        cats = sorted(per_cat_pc_var.keys())
+                        n_pcs = len(next(iter(per_cat_pc_var.values())))
+
+                        width = 0.8 / len(cats)
+                        x = np.arange(n_pcs)
+
+                        for i, cat in enumerate(cats):
+                            ax_var.bar(
+                                x + i * width, 
+                                per_cat_pc_var[cat], 
+                                width=width, 
+                                label=cat, 
+                                alpha=0.7
+                            )
+
+                        ax_var.set_title("Variance Explained per PC")
+                        ax_var.set_xlabel("PC")
+                        ax_var.set_ylabel("Explained Variance")
+                        ax_var.set_xticks(x + width * (len(cats)-1)/2)
+                        ax_var.set_xticklabels([f"PC{i+1}" for i in range(n_pcs)], rotation=45)
+                        ax_var.set_ylim(0, 1)
+                        ax_var.legend(loc="upper left", bbox_to_anchor=(1.02, 1.0))
+
 
             fig.tight_layout()
             save_path = os.path.join(save_base, f"{region}_comparison.png")
