@@ -48,7 +48,7 @@ class CrossCorrConfig(FixationConfig):
         self.job_name = "crosscorr_shuffled"
         self.job_file_name = "crosscorr_shuffled_job_array.txt"
         self.python_script_relative = "scripts/behav_analysis/04_inter_agent_crosscorr.py"
-        self.env_name = "gaze_processing" if self.is_grace else "socialgaze"
+        self.env_name = "socialgaze" if self.is_grace else "gaze_processing"
         self.partition = "day" if self.is_grace else "psych_day"
         self.cpus_per_task = 8
         self.mem_per_cpu = 8000

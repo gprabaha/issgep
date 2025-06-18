@@ -94,11 +94,12 @@ def submit_dsq_array_job(config) -> str:
     logger.info("Submitting job array via sbatch")
     result = subprocess.run(
         f'sbatch --job-name=dsq_{config.job_name} '
-        f'--output={config.log_dir}/fixation_%a.out '
-        f'--error={config.log_dir}/fixation_%a.err '
+        f'--output={config.log_dir}/{config.job_name}_%a.out '
+        f'--error={config.log_dir}/{config.job_name}_%a.err '
         f'{config.sbatch_script_path}',
         shell=True, check=True, capture_output=True, text=True, executable='/bin/bash'
     )
+
 
     job_id = result.stdout.strip().split()[-1]
     logger.info(f"Submitted job array with ID: {job_id}")

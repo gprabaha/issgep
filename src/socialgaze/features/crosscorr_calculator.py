@@ -159,7 +159,7 @@ class CrossCorrCalculator:
 
         generate_crosscorr_job_file(tasks, self.config)
         job_id = submit_dsq_array_job(self.config)
-        submit_dsq_array_job(job_id)
+        track_job_completion(job_id)
         self.combine_and_save_shuffled_results()
 
 
@@ -174,12 +174,24 @@ class CrossCorrCalculator:
             a2, b2 (str): Agent 2 and their behavior type.
             period_type (str): One of "full", "interactive", or "non_interactive".
         """
+        logger.info(
+            f"Computing shuffled crosscorr: session={session}, run={run}, "
+            f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}"
+        )
         try:
             df1 = self.fixation_detector.get_binary_vector_df(b1)
             df2 = self.fixation_detector.get_binary_vector_df(b2)
         except FileNotFoundError:
             logger.warning(f"Missing binary vector: {b1} or {b2}")
             return
+
+        # Normalize inputs
+        a1 = a1.lower().strip()
+        a2 = a2.lower().strip()
+        session = session.strip()
+        
+        df1["run_number"] = pd.to_numeric(df1["run_number"], errors="coerce")
+        df2["run_number"] = pd.to_numeric(df2["run_number"], errors="coerce")
 
         df1 = df1[(df1["agent"] == a1) & (df1["session_name"] == session) & (df1["run_number"] == run)]
         df2 = df2[(df2["agent"] == a2) & (df2["session_name"] == session) & (df2["run_number"] == run)]

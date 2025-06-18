@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--session", type=str)
-    parser.add_argument("--run", type=int)
+    parser.add_argument("--run", type=str)
     parser.add_argument("--a1", type=str)
     parser.add_argument("--b1", type=str)
     parser.add_argument("--a2", type=str)
@@ -49,6 +49,7 @@ def main():
 
     if args.session and args.run and args.a1 and args.b1 and args.a2 and args.b2:
         if args.mode == "shuffled":
+            args.run = int(args.run)
             calculator.compute_shuffled_crosscorrelations_for_single_run(
                 session=args.session,
                 run=args.run,
@@ -60,7 +61,7 @@ def main():
             raise NotImplementedError("Only shuffled mode is supported for single-run jobs.")
     else:
         # calculator.compute_crosscorrelations(by_interactivity_period=False)
-        calculator.compute_crosscorrelations(by_interactivity_period=True)
+        # calculator.compute_crosscorrelations(by_interactivity_period=True)
         calculator.compute_shuffled_crosscorrelations(by_interactivity_period=False)
         calculator.compute_shuffled_crosscorrelations(by_interactivity_period=True)
 
