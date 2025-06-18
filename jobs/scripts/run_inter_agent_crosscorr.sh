@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=inter_agent_crosscorr
 #SBATCH --cpus-per-task=16
-#SBATCH --mem-per-cpu=8G
+#SBATCH --mem-per-cpu=6G
 #SBATCH --time=5:00:00
 #SBATCH --partition=psych_day
 #SBATCH --output=jobs/logs/main_shuffled_crosscorr_job.out

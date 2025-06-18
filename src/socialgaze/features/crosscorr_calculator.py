@@ -285,6 +285,8 @@ class CrossCorrCalculator:
             name = f"{a1}_{b1}__vs__{a2}_{b2}"
             if period_type != "full":
                 name += f"_{period_type}"
+            pd.set_option("display.width", 0)
+            pd.set_option("display.max_columns", None)
             logger.info(f"Resultant dataframe for {name}:\n{out_df.head()}")
 
             temp_dir = self.config.crosscorr_shuffled_temp_dir
@@ -321,6 +323,9 @@ class CrossCorrCalculator:
         for group_key, file_list in grouped_paths.items():
             dfs = [pd.read_pickle(f) for f in file_list]
             combined = pd.concat(dfs, ignore_index=True)
+            pd.set_option("display.width", 0)
+            pd.set_option("display.max_columns", None)
+            logger.info(f"Resultant dataframe for {group_key}:\n{combined.head()}")
             out_path = output_dir / f"{group_key}.pkl"
             combined.to_pickle(out_path)
             logger.info(f"Saved COMBINED shuffled cross-correlation: {out_path}")
