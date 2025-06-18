@@ -94,14 +94,15 @@ class PCProjector:
                 n_components=pca.n_components_,
                 transform_spec=transform_spec,
             )
-            per_pc_explained = compute_per_pc_explained_variance_per_category(
-                pca, region_df, unit_order, category_order
+
+            per_pc_var_explained = compute_per_pc_explained_variance_per_category(
+                pca, region_df, unit_order, category_order, self.config.normalize_variance_within_category
             )
             
             # Store and save
             self.pc_projection_dfs[key][region] = proj_df
             self.pc_projection_meta[key]["category_order"] = category_order
-            self.pc_projection_meta[key][f"{region}_category_pc_var_explained"] = per_pc_explained
+            self.pc_projection_meta[key][f"{region}_category_pc_var_explained"] = per_pc_var_explained
 
             save_df_to_pkl(
                 proj_df,
@@ -399,49 +400,81 @@ class PCProjector:
         return load_df_from_pkl(path)
 
 
-def compute_per_pc_explained_variance_per_category(pca, region_df, unit_order, category_order):
+def compute_per_pc_explained_variance_per_category(
+    pca,
+    region_df,
+    unit_order,
+    category_order,
+    normalize_within_category: bool = True
+):
     """
     For each category, computes variance explained by each PC individually.
+
+    Args:
+        pca: fitted PCA model
+        region_df: PSTH dataframe for one brain region
+        unit_order: list of unit UUIDs (same order as used in PCA fitting)
+        category_order: list of categories (should match PCA fitting order)
+        normalize_within_category: 
+            - True: normalize variance explained within each category
+            - False: normalize all residuals using global total variance (shared across categories)
 
     Returns:
         Dict[str, List[float]]: category -> list of variance explained per PC
     """
     category_pc_var_explained = {}
-    components = pca.components_  # shape: (n_components, n_features)
     n_components = pca.n_components_
 
+    # === Step 1: Compute global variance matrix (optional) ===
+    if not normalize_within_category:
+        pop_list = []
+        for unit_uuid in unit_order:
+            unit_frs = []
+            for cat in category_order:
+                row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
+                if row.shape[0] != 1:
+                    raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
+                fr = np.array(row.iloc[0]["avg_firing_rate"])
+                unit_frs.append(fr)
+            pop_list.append(np.concatenate(unit_frs))  # shape: (T * C,)
+        X_all = np.stack(pop_list, axis=0).T  # shape: (samples, units)
+        global_total_var = np.sum((X_all - pca.mean_) ** 2) + np.finfo(float).eps
+
+    # === Step 2: Per-category analysis ===
     for cat in category_order:
-        # Step 1: Extract and shape firing rate matrix (n_timepoints x n_units)
-        X_cat = []
+        unit_frs = []
         for unit_uuid in unit_order:
             row = region_df.query("unit_uuid == @unit_uuid and category == @cat")
             if row.shape[0] != 1:
                 raise ValueError(f"Expected 1 row for {unit_uuid}, {cat}, got {row.shape[0]}")
             fr = np.array(row.iloc[0]["avg_firing_rate"])
-            X_cat.append(fr)
-        X_cat = np.stack(X_cat, axis=1)  # shape: (T, N)
+            unit_frs.append(fr)
+        X_cat = np.stack(unit_frs, axis=0).T  # shape: (T, N) ← same as PCA input shape
 
-        # Step 2: Project using PCA (which uses internal mean-centering)
-        X_proj = pca.transform(X_cat)  # shape: (T, n_components)
+        # Project and optionally compute per-category total variance
+        X_proj = pca.transform(X_cat)
 
-        # Step 3: Total variance of original data
-        X_cat_centered = X_cat - pca.mean_ # subtract pca mean which was used for centering
-        total_var = np.sum(X_cat_centered ** 2) + np.finfo(float).eps  # avoid division by zero
+        if normalize_within_category:
+            total_var = np.sum((X_cat - pca.mean_) ** 2) + np.finfo(float).eps
+        else:
+            total_var = global_total_var
 
-        # Step 4: Reconstruct using individual PCs and compute explained variance
+        # Reconstruct using each PC separately
         pc_var_explained = []
-        for i in range(pca.n_components_):
-            # Keep only i-th PC
+        for i in range(n_components):
             X_proj_i = np.zeros_like(X_proj)
             X_proj_i[:, i] = X_proj[:, i]
-
-            # Reconstruct using inverse_transform
             X_recon_i = pca.inverse_transform(X_proj_i)
-
-            # Compute explained variance
             residual = X_cat - X_recon_i
             residual_var = np.sum(residual ** 2)
+
             explained = 1 - residual_var / total_var
+            if not (0.0 <= explained <= 1.0):
+                raise ValueError(
+                    f"Explained variance for PC {i} in category '{cat}' was {explained:.4f}, "
+                    f"which is outside the valid range [0, 1]."
+                )
+
             pc_var_explained.append(explained)
 
         category_pc_var_explained[cat] = pc_var_explained

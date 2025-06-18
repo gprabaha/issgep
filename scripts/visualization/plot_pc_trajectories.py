@@ -12,6 +12,7 @@ Run:
     python scripts/visualization/plot_pc_trajectories.py
 """
 
+import pdb
 import logging
 from itertools import product
 from collections import defaultdict

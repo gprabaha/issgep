@@ -24,6 +24,7 @@ class PCAConfig(BaseConfig):
 
         # === Category selection ===
         self.categories_to_include: list = None  # If None, use all
+        self.normalize_variance_within_category: bool = False
 
         # === Paths to save fits and projections ===
         self.pc_projection_base_dir = get_pc_model_basedir(self)

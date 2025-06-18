@@ -249,7 +249,7 @@ class CrossCorrCalculator:
                 logger.warning(f"Shuffling failed for {session}-{run} | {a1}-{b1} vs {a2}-{b2}: {e}")
                 continue
             
-            logger.info(f"Computing cross-correlation for for {a1}-{b1} and {a2}-{b2} | {session}-run{run} [{period_type}]")
+            logger.info(f"Computing cross-correlation for {a1}-{b1} and {a2}-{b2} | {session}-run{run} [{period_type}]")
             results = Parallel(n_jobs=self.config.num_cpus)(
                 delayed(_compute_normalized_crosscorr)(
                     s1, s2,
