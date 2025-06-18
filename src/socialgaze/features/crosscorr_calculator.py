@@ -279,8 +279,6 @@ class CrossCorrCalculator:
             })
             all_rows.append(df)
 
-            pdb.set_trace()  # Debugging breakpoint
-
         # --- Save temporary results ---
         if all_rows:
             out_df = pd.concat(all_rows, ignore_index=True)
