@@ -225,8 +225,6 @@ class PCProjector:
         return results
 
 
-
-
     def _get_filtered_psth_df(self, categories, split_by_interactive, agent=None):
         """
         Returns a filtered PSTH DataFrame based on specified categories, interactivity split, and agent.
