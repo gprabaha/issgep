@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --output /gpfs/milgram/pi/chang/pg496/repositories/issgep/jobs/logs
-#SBATCH --array 0-2084
+#SBATCH --array 0-4169
 #SBATCH --job-name dsq-crosscorr_shuffled_job_array
 #SBATCH --partition psych_day --cpus-per-task 8 --mem-per-cpu 6000 -t 00:20:00 --mail-type FAIL
 

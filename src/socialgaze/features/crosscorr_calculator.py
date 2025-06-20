@@ -49,6 +49,7 @@ class CrossCorrCalculator:
         self.fixation_detector = fixation_detector
         self.interactivity_detector = interactivity_detector
 
+
     def compute_crosscorrelations(self, by_interactivity_period: bool = False):
         """
         Computes cross-correlations for each session/run and agent-behavior pair.

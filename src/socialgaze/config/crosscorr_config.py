@@ -2,7 +2,6 @@
 
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.utils.path_utils import (
-    get_crosscorr_job_file_path,
     get_crosscorr_shuffled_output_dir,
     get_crosscorr_worker_script_path,
     get_job_file_path,
