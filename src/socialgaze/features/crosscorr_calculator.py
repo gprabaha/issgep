@@ -195,8 +195,6 @@ class CrossCorrCalculator:
             logger.warning(f"Missing binary vector: {b1} or {b2}")
             return
         
-        pdb.set_trace()
-        
         # --- Normalize DataFrame columns ---
         for df in [df1, df2]:
             df["agent"] = df["agent"].astype(str).str.lower().str.strip()
@@ -334,8 +332,6 @@ class CrossCorrCalculator:
             for f in file_list:
                 os.remove(f)
                 logger.debug(f"Deleted temp file: {f}")
-
-
 
 
     def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:

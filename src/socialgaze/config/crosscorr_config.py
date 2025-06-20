@@ -36,8 +36,8 @@ class CrossCorrConfig(FixationConfig):
         self.normalize: bool = True
         self.use_energy_norm: bool = True
         self.make_shuffle_stringent: bool = True
-        self.num_shuffles: int = 500
-        self.run_single_test_case: bool = True
+        self.num_shuffles: int = 1000
+        self.run_single_test_case: bool = False
 
         # === Output paths ===
         self.crosscorr_shuffled_output_dir = get_crosscorr_shuffled_output_dir(self)
@@ -52,7 +52,7 @@ class CrossCorrConfig(FixationConfig):
         self.partition = "day" if self.is_grace else "psych_day"
         self.cpus_per_task = 8
         self.mem_per_cpu = 4000
-        self.time_limit = "00:20:00"
+        self.time_limit = "00:10:00"
 
         # Assign paths specific to this job
         self._assign_paths()
