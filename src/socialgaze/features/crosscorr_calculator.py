@@ -284,9 +284,7 @@ class CrossCorrCalculator:
         # --- Save temporary results ---
         if all_rows:
             out_df = pd.concat(all_rows, ignore_index=True)
-            name = f"{a1}_{b1}__vs__{a2}_{b2}"
-            if period_type != "full":
-                name += f"_{period_type}"
+            name = f"{a1}_{b1}__vs__{a2}_{b2}__{period_type}"
             pd.set_option("display.width", 0)
             pd.set_option("display.max_columns", None)
             logger.info(f"Resultant dataframe for {name}:\n{out_df.head()}")
@@ -312,14 +310,14 @@ class CrossCorrCalculator:
         grouped_paths: Dict[str, List[str]] = {}
         for path in glob(str(temp_dir / "*.pkl")):
             filename = os.path.basename(path)
-            parts = filename.split("__")
-
-            # Extract group key
-            if parts[1] in {"full", "interactive", "non_interactive"}:
-                group_key = f"{parts[0]}__{parts[1]}"
-            else:
-                group_key = parts[0]
-
+            parts = filename.replace(".pkl", "").split("__")
+            
+            # Example: "m1_face_fixation__vs__m2_face_fixation__full__20200101__run1.pkl"
+            if len(parts) < 6:
+                logger.warning(f"Unexpected filename format: {filename}")
+                continue
+            # group_key = "m1_face_fixation__vs__m2_face_fixation__full"
+            group_key = "__".join(parts[:4])
             grouped_paths.setdefault(group_key, []).append(path)
 
         for group_key, file_list in grouped_paths.items():
@@ -330,12 +328,13 @@ class CrossCorrCalculator:
             logger.info(f"Resultant dataframe for {group_key}:\n{combined.head()}")
             out_path = output_dir / f"{group_key}.pkl"
             combined.to_pickle(out_path)
-            logger.info(f"Saved COMBINED shuffled cross-correlation: {out_path}")
+            logger.info(f"Saved COMBINED shuffled cross-correlation for {group_key} to: {out_path}")
 
             # Clean up
             for f in file_list:
                 os.remove(f)
                 logger.debug(f"Deleted temp file: {f}")
+
 
 
 
