@@ -195,7 +195,6 @@ class CrossCorrCalculator:
         except FileNotFoundError:
             logger.warning(f"Missing binary vector: {b1} or {b2}")
             return
-        
         # --- Normalize DataFrame columns ---
         for df in [df1, df2]:
             df["agent"] = df["agent"].astype(str).str.lower().str.strip()
