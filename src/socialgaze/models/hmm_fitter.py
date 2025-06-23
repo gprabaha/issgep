@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import List, Tuple, Dict
 from tqdm import tqdm
 from pyhsmm.models import HSMM
-from pyhsmm.basic.distributions import Categorical, PoissonDuration
+from hmmlearn.hmm import CategoricalHMM
+from pyhsmm.basic.distributions import Categorical, PoissonDuration, NegativeBinomialDuration
+from scipy import stats
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,8 @@ class HMMFitter:
 
         self.behavior_types = config.binary_vector_types_to_use
         self.output_dir = config.hmm_model_output_path
+        self.monkey_pairs_df = self.config.ephys_days_and_monkeys_df
+
 
     def fit_downsampled_hmm_all_runs(self, downsample_factor=50):
         all_vector_data = self._collect_joint_categorical_vectors(downsample_factor=downsample_factor)
@@ -36,6 +40,7 @@ class HMMFitter:
         with open(save_path, "wb") as f:
             pickle.dump(model, f)
         logger.info(f"Saved HMM model to {save_path}")
+
 
     def fit_event_level_hsmm(self):
         all_obs_and_durs = self._collect_event_level_observations_and_durations()
@@ -63,6 +68,81 @@ class HMMFitter:
             pickle.dump(model, f)
         logger.info(f"Saved HSMM model to {save_path}")
 
+
+    def fit_event_level_hsmm(self):
+        all_obs_and_durs_by_pair = self._collect_event_level_observations_and_durations_by_monkey_pair()
+
+        for pair, obs_and_durs in all_obs_and_durs_by_pair.items():
+            logger.info(f"Fitting HSMM for monkey pair: {pair} using Negative Binomial durations")
+            observations = [np.array(obs) for obs, _ in obs_and_durs]
+            durations = [np.array(durs) for _, durs in obs_and_durs]
+
+            K = self.config.num_states
+            n_obs = (len(self.behavior_types) + 1) ** 2
+
+            obs_distns = [Categorical(K=n_obs) for _ in range(K)]
+            dur_distns = [NegativeBinomialDuration(a_0=1.0, b_0=1.0) for _ in range(K)]
+
+            model = HSMM(alpha=6., init_state_concentration=6., obs_distns=obs_distns, dur_distns=dur_distns)
+
+            for obs, dur in zip(observations, durations):
+                model.add_data(obs, lengths=dur)
+
+            for idx in range(100):
+                model.resample_model()
+
+            save_path = self.output_dir / f"hsmm_model_{pair.replace('-', '_')}_neg_binom.pkl"
+            with open(save_path, "wb") as f:
+                pickle.dump(model, f)
+            logger.info(f"Saved HSMM model for {pair} to {save_path}")
+
+
+    def _collect_event_level_observations_and_durations_by_monkey_pair(self) -> Dict[str, List[Tuple[List[int], List[int]]]]:
+        all_dfs = []
+        for btype in self.behavior_types:
+            df = self.fixation_detector.get_binary_vector_df(behavior_type=btype)
+            df["behavior_type"] = btype
+            all_dfs.append(df)
+
+        full_df = pd.concat(all_dfs, ignore_index=True)
+        full_df = full_df.merge(self.monkey_pairs_df[["session_name", "monkey_pair"]], on="session_name", how="left")
+
+        session_runs = full_df[["session_name", "run_number"]].drop_duplicates()
+        all_obs_and_durs_by_pair = {}
+
+        for _, row in session_runs.iterrows():
+            session, run = row["session_name"], row["run_number"]
+            monkey_pair = full_df.query("session_name == @session")["monkey_pair"].iloc[0]
+
+            run_df = full_df.query("session_name == @session and run_number == @run")
+            m1_vec = self._encode_agent_behaviors(run_df, "m1")
+            m2_vec = self._encode_agent_behaviors(run_df, "m2")
+            joint_vec = self._combine_agent_vectors(m1_vec, m2_vec)
+
+            obs, durs = self._compress_categorical_with_durations(joint_vec)
+            if monkey_pair not in all_obs_and_durs_by_pair:
+                all_obs_and_durs_by_pair[monkey_pair] = []
+            all_obs_and_durs_by_pair[monkey_pair].append((obs, durs))
+
+        return all_obs_and_durs_by_pair
+
+    def compare_duration_fits(self, durations: List[int]) -> Dict[str, float]:
+        durations = np.array(durations)
+        mu = durations.mean()
+        var = durations.var()
+
+        # Fit Poisson (1 param) and Negative Binomial (2 param)
+        poisson_ll = np.sum(stats.poisson(mu).logpmf(durations))
+
+        # Method-of-moments estimate for neg binom
+        p = mu / var if var > mu else 0.99
+        r = mu**2 / (var - mu) if var > mu else 1.0
+        negbin_ll = np.sum(stats.nbinom(n=r, p=p).logpmf(durations))
+
+        return {"poisson_loglik": poisson_ll, "negbinom_loglik": negbin_ll}
+
+
+
     def _collect_joint_categorical_vectors(self, downsample_factor=None) -> List[Tuple[str, int, np.ndarray]]:
         all_dfs = []
         for btype in self.behavior_types:
@@ -85,6 +165,7 @@ class HMMFitter:
             results.append((session, run, joint_vec))
         return results
 
+
     def _encode_agent_behaviors(self, df: pd.DataFrame, agent: str, downsample_factor=None) -> np.ndarray:
         sub = df[df["agent"] == agent]
         sub = sub.groupby("behavior_type")["binary_vector"].first().to_dict()
@@ -106,16 +187,17 @@ class HMMFitter:
 
         return category_vector
 
+
     def _combine_agent_vectors(self, v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
         n = len(self.behavior_types) + 1
         return v1 * n + v2
 
-    def _fit_hmm_to_sequence(self, seq: np.ndarray, lengths: List[int]):
-        from hmmlearn.hmm import CategoricalHMM
 
+    def _fit_hmm_to_sequence(self, seq: np.ndarray, lengths: List[int]):
         model = CategoricalHMM(n_components=self.config.num_states, n_iter=100, verbose=True)
         model.fit(seq, lengths)
         return model
+
 
     def _collect_event_level_observations_and_durations(self) -> List[Tuple[List[int], List[int]]]:
         all_dfs = []
@@ -140,6 +222,7 @@ class HMMFitter:
             all_obs_and_durs.append((obs, durs))
 
         return all_obs_and_durs
+
 
     def _compress_categorical_with_durations(self, vector: np.ndarray) -> Tuple[List[int], List[int]]:
         obs = []
