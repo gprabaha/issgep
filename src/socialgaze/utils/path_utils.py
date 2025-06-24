@@ -578,8 +578,8 @@ class CrossCorrPaths:
     def get_shuffled_output_dir(self) -> Path:
         return Path(self.config.output_dir) / "crosscorr_shuffled"
 
-    def get_temp_dir(self) -> Path:
-        return self.config.crosscorr_shuffled_temp_dir
+    def get_shuffled_temp_dir(self) -> Path:
+        return self.get_shuffled_output_dir() / "temp"
 
     # === Observed cross-correlation filenames and paths ===
 
@@ -603,7 +603,7 @@ class CrossCorrPaths:
         return f"{name}__{period_type}__{session}__run{run}.pkl"
 
     def get_shuffled_temp_path(self, session, run, a1, b1, a2, b2, period_type: str) -> Path:
-        return self.get_temp_dir() / self.get_shuffled_temp_filename(session, run, a1, b1, a2, b2, period_type)
+        return self.get_shuffled_temp_dir() / self.get_shuffled_temp_filename(session, run, a1, b1, a2, b2, period_type)
 
     def get_shuffled_final_filename(self, a1, b1, a2, b2, period_type: str) -> str:
         name = self.get_comparison_name(a1, b1, a2, b2)

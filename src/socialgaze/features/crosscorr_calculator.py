@@ -199,7 +199,10 @@ class CrossCorrCalculator:
         # --- Try loading binary vectors ---
         try:
             df1 = self.fixation_detector.get_binary_vector_df(b1)
-            df2 = self.fixation_detector.get_binary_vector_df(b2)
+            if b1==b2: # if we are comparing teh same behavior between two agents
+                df2 = df1
+            else:
+                df2 = self.fixation_detector.get_binary_vector_df(b2)
         except FileNotFoundError:
             logger.warning(f"Missing binary vector: {b1} or {b2}")
             return
@@ -292,8 +295,7 @@ class CrossCorrCalculator:
             out_df = pd.concat(all_rows, ignore_index=True)
             pd.set_option("display.width", 0)
             pd.set_option("display.max_columns", None)
-            f"Computing shuffled crosscorr: session={session}, run={run}, "
-            f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}"
+
             logger.info(f"Resultant dataframe for session={session}, run={run}, "
                 f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}"
                 f"\n{out_df.head()}"

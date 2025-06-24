@@ -100,11 +100,9 @@ def submit_dsq_array_job(config) -> str:
         shell=True, check=True, capture_output=True, text=True, executable='/bin/bash'
     )
 
-
     job_id = result.stdout.strip().split()[-1]
     logger.info(f"Submitted job array with ID: {job_id}")
     return job_id
-
 
 
 def track_job_completion(job_id: str, poll_secs: int = 30, log_every_secs: int = 60):
