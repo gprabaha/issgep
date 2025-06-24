@@ -1,5 +1,6 @@
 # src/socialgaze/utils/path_utils.py
 
+import logging
 import os
 from pathlib import Path
 from typing import Dict, Union
@@ -7,6 +8,7 @@ from datetime import date
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
 
+logger = logging.getLogger(__name__)
 # --------------------
 # == Root paths ==
 # --------------------
@@ -551,7 +553,7 @@ def join_folder_and_filename(folder: Union[str, Path], filename: str) -> Path:
     return Path(folder) / filename
 
 
-from socialgaze.config.crosscorr_config import CrossCorrConfig
+
 
 class CrossCorrPaths:
     """
@@ -559,12 +561,12 @@ class CrossCorrPaths:
     All file naming conventions and directory logic should be encapsulated here.
     """
 
-    def __init__(self, config: CrossCorrConfig):
+    def __init__(self, config):
         self.config = config
 
     # === Job script and worker path ===
-    def get_job_file_path(self) -> Path:
-        return self.config.project_root / "jobs" / "scripts" / "crosscorr_jobs.tsv"
+    def get_job_file_path(self, job_file_name) -> Path:
+        return self.config.project_root / "jobs" / "scripts" / job_file_name
 
     def get_worker_script_path(self) -> Path:
         return self.config.project_root / "scripts" / "behav_analysis" / "04_inter_agent_crosscorr.py"
@@ -586,8 +588,7 @@ class CrossCorrPaths:
 
     def get_obs_crosscorr_filename(self, a1, b1, a2, b2, period_type: str) -> str:
         name = self.get_comparison_name(a1, b1, a2, b2)
-        if period_type != "full":
-            name += f"__{period_type}"
+        name += f"__{period_type}"
         return f"{name}.pkl"
 
     def get_obs_crosscorr_path(self, a1, b1, a2, b2, period_type: str) -> Path:
@@ -605,9 +606,8 @@ class CrossCorrPaths:
         return self.get_temp_dir() / self.get_shuffled_temp_filename(session, run, a1, b1, a2, b2, period_type)
 
     def get_shuffled_final_filename(self, a1, b1, a2, b2, period_type: str) -> str:
-        name = f"{a1}_{b1}__vs__{a2}_{b2}"
-        if period_type != "full":
-            name += f"__{period_type}"
+        name = self.get_comparison_name(a1, b1, a2, b2)
+        name += f"__{period_type}"
         return f"{name}.pkl"
 
     def get_shuffled_final_path(self, a1, b1, a2, b2, period_type: str) -> Path:
@@ -658,7 +658,6 @@ class CrossCorrPaths:
             grouped_paths[group_key].append(path)
 
         return grouped_paths
-
 
     # === Final results file ===
     def get_analysis_output_path(self) -> Path:

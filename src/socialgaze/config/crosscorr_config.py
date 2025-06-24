@@ -1,19 +1,11 @@
 # src/socialgaze/config/crosscorr_config.py
 
-from socialgaze.config.fixation_config import FixationConfig
-from socialgaze.utils.path_utils import (
-    get_crosscorr_output_dir,
-    get_crosscorr_shuffled_output_dir,
-    get_crosscorr_worker_script_path,
-    get_job_file_path,
-    get_sbatch_script_path,
-    get_job_out_dir,
-    get_log_dir,
-)
-from pathlib import Path
+import pdb
+from socialgaze.config.base_config import BaseConfig
+from socialgaze.utils.path_utils import CrossCorrPaths, get_job_out_dir, get_log_dir, get_sbatch_script_path
 
 
-class CrossCorrConfig(FixationConfig):
+class CrossCorrConfig(BaseConfig):
     def __init__(self):
         super().__init__()
 
@@ -48,12 +40,13 @@ class CrossCorrConfig(FixationConfig):
         self.mem_per_cpu = 4000
         self.time_limit = "00:10:00"
 
+        self.paths = CrossCorrPaths(self)
         # Assign paths specific to this job
         self._assign_paths()
 
     def _assign_paths(self):
-        self.job_file_path = get_job_file_path(self.project_root, self.job_file_name)
+        self.job_file_path = self.paths.get_job_file_path(self.job_file_name)
         self.job_out_dir = get_job_out_dir(self.project_root)
         self.log_dir = get_log_dir(self.job_out_dir)
-        self.worker_python_script_path = get_crosscorr_worker_script_path(self.project_root)
+        self.worker_python_script_path = self.paths.get_worker_script_path()
         self.sbatch_script_path = get_sbatch_script_path(self.job_out_dir, self.job_name)

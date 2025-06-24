@@ -74,7 +74,10 @@ class CrossCorrCalculator:
         for a1, b1, a2, b2 in tqdm(self.config.crosscorr_agent_behavior_pairs, desc="Agent-behavior pairs"):
             try:
                 df1 = self.fixation_detector.get_binary_vector_df(b1)
-                df2 = self.fixation_detector.get_binary_vector_df(b2)
+                if b1==b2: # if we are comparing teh same behavior between two agents
+                    df2 = df1
+                else:
+                    df2 = self.fixation_detector.get_binary_vector_df(b2)
             except FileNotFoundError:
                 logger.warning(f"Missing binary vector: {b1} or {b2}")
                 continue
@@ -121,8 +124,10 @@ class CrossCorrCalculator:
                     full_df = pd.concat(all_rows, ignore_index=True)
                     out_path = self.paths.get_obs_crosscorr_path(a1, b1, a2, b2, period_type)
                     save_df_to_pkl(full_df, out_path)
-                    logger.info(f"Saved observed crosscorr df to: {out_path}")
-
+                    logger.info(f"Saved observed crosscorr df to: {out_path}"
+                        "\nHead of calculated dataframe:"
+                        f"\n{full_df.head()}"
+                    )
         logger.info("Cross-correlation computation complete.")
 
 
@@ -287,7 +292,12 @@ class CrossCorrCalculator:
             out_df = pd.concat(all_rows, ignore_index=True)
             pd.set_option("display.width", 0)
             pd.set_option("display.max_columns", None)
-            logger.info(f"Resultant dataframe for {name}:\n{out_df.head()}")
+            f"Computing shuffled crosscorr: session={session}, run={run}, "
+            f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}"
+            logger.info(f"Resultant dataframe for session={session}, run={run}, "
+                f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}"
+                f"\n{out_df.head()}"
+            )
 
             out_path = self.paths.get_shuffled_temp_path(session, run, a1, b1, a2, b2, period_type)
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -473,10 +483,24 @@ def _get_periods_for_run(inter_df, session, run, period_type, full_len):
         (inter_df.run_number == run)
     ]
     if run_periods.empty:
+        logger.warning(f"Binary vector data was empty for session {session}, run {run}, and period_type {period_type}")
         return []
     inter = run_periods[["start", "stop"]].values
     return inter if period_type == "interactive" else _compute_complement_periods(inter, [(0, full_len - 1)])
 
+
+def _compute_complement_periods(included: np.ndarray, total: List[tuple]) -> List[tuple]:
+    if included.size == 0:
+        return total
+    complement = []
+    current = total[0][0]
+    for start, stop in included:
+        if current < start:
+            complement.append((current, start - 1))
+        current = stop + 1
+    if current <= total[0][1]:
+        complement.append((current, total[0][1]))
+    return complement
 
 def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2, period_type, config):
     all_rows = []
@@ -504,13 +528,6 @@ def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2
         })
         all_rows.append(rows)
     return all_rows
-
-
-def _save_crosscorr_df(df, comparison_name, config):
-    path = get_crosscorr_output_path(config, comparison_name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving {comparison_name} dataframe.")
-    save_df_to_pkl(df, path)
 
 
 def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: Optional[int] = None, normalize: bool = True, use_energy_norm: bool = False):
@@ -542,20 +559,6 @@ def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: Optiona
                 corr[:] = 0
 
     return lags, corr
-
-
-def _compute_complement_periods(included: np.ndarray, total: List[tuple]) -> List[tuple]:
-    if included.size == 0:
-        return total
-    complement = []
-    current = total[0][0]
-    for start, stop in included:
-        if current < start:
-            complement.append((current, start - 1))
-        current = stop + 1
-    if current <= total[0][1]:
-        complement.append((current, total[0][1]))
-    return complement
 
 
 
