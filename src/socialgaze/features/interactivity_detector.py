@@ -297,19 +297,14 @@ def normalize_density(arr):
 
 
 def _get_interactive_periods(binary_vector):
-    """
-    Identifies contiguous segments of 1's in a binary vector, marking interactive periods.
-    Args:
-        binary_vector (np.ndarray or List[int]): A binary vector where 1 indicates interactivity.
-    Returns:
-        List[Tuple[int, int]]: A list of (start, stop) index tuples marking interactive intervals.
-    """
-
-    vec = np.array(binary_vector).astype(int)
+    vec = np.asarray(binary_vector, dtype=int)
     if np.all(vec == 0):
         return []
 
-    changes = np.where(np.diff(np.pad(vec, (1, 1), 'constant')) != 0)[0]
-    starts = changes[::2]
-    stops = changes[1::2]
+    padded = np.pad(vec, (1, 1), constant_values=0)
+    change_indices = np.flatnonzero(np.diff(padded))
+    starts = change_indices[::2]
+    stops = change_indices[1::2]
+    stops = np.minimum(stops, len(vec) - 1)  # Clamp at valid index
     return list(zip(starts, stops))
+

@@ -528,7 +528,7 @@ def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2
 
     for start, stop in periods:
         if start >= len(v1) or stop >= len(v1) or start >= len(v2) or stop >= len(v2):
-            logger.warning(f"Skipping invalid period ({start}, {stop}) for session {session}, run {run}")
+            logger.warning(f"Skipping invalid period ({start}, {stop}) for session {session}, run {run}, len v1: {len(v1)}, len v2: {len(v2)}")
             continue
         full_seg1[start:stop + 1] = v1[start:stop + 1]
         full_seg2[start:stop + 1] = v2[start:stop + 1]
