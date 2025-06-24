@@ -12,6 +12,8 @@ import numpy as np
 from tqdm import tqdm
 from scipy.signal import fftconvolve
 from joblib import Parallel, delayed
+from scipy.stats import ttest_1samp
+from collections import defaultdict
 
 from socialgaze.config.crosscorr_config import CrossCorrConfig
 from socialgaze.features.fixation_detector import FixationDetector
@@ -334,6 +336,141 @@ class CrossCorrCalculator:
                 logger.debug(f"Deleted temp file: {f}")
 
 
+
+
+
+
+
+    from scipy.stats import ttest_1samp
+    from collections import defaultdict
+    import numpy as np
+    import pandas as pd
+
+    def analyze_crosscorr_vs_shuffled_per_pair(self):
+        """
+        Compares observed vs shuffled crosscorrelations for each behavior pair and period,
+        grouped by monkey identity pairs from self.config.ephys_days_and_monkeys.
+        Handles lag truncation and saves full results.
+        """
+        results = []
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", 0)
+
+        session_to_monkey_pair = self.config.ephys_days_and_monkeys.set_index("session_name")[["m1", "m2"]].to_dict("index")
+
+        for a1, b1, a2, b2 in self.config.crosscorr_agent_behavior_pairs:
+            for period_type in ["full", "interactive", "non_interactive"]:
+                comparison_name = f"{a1}_{b1}__vs__{a2}_{b2}"
+                group_key = comparison_name if period_type == "full" else f"{comparison_name}__{period_type}"
+
+                obs_path = self.config.crosscorr_output_dir / f"{comparison_name}__{period_type}.pkl"
+                shuffled_path = self.config.crosscorr_shuffled_output_dir / f"{group_key}.pkl"
+
+                if not obs_path.exists() or not shuffled_path.exists():
+                    self.logger.warning(f"Missing observed or shuffled file for {group_key}")
+                    continue
+
+                try:
+                    observed_df = pd.read_pickle(obs_path)
+                    shuffled_df = pd.read_pickle(shuffled_path)
+                except Exception as e:
+                    self.logger.warning(f"Error loading {group_key}: {e}")
+                    continue
+
+                obs_groups = observed_df.groupby(["session_name", "run_number"])
+                shuffle_groups = shuffled_df.groupby(["session_name", "run_number"])
+
+                delta_dict = defaultdict(list)
+                lag_dict = {}
+
+                for (session, run), obs_group in obs_groups:
+                    session = str(session)
+                    run = str(run)
+
+                    if session not in session_to_monkey_pair:
+                        self.logger.warning(f"No monkey ID info for session {session}")
+                        continue
+                    monkey_pair = tuple(session_to_monkey_pair[session].values())
+
+                    try:
+                        shuffle_group = shuffle_groups.get_group((session, run))
+                    except KeyError:
+                        self.logger.warning(f"No shuffled data for session {session} run {run}")
+                        continue
+
+                    try:
+                        obs_sorted = obs_group.sort_values("lag")
+                        lags = obs_sorted["lag"].values
+                        obs_corr = obs_sorted["crosscorr"].values
+
+                        # Shuffled vector is stored as a row with single array
+                        shuffled_mean = shuffle_group.iloc[0]["crosscorr_mean"]
+
+                        # Ensure symmetry
+                        min_len = min(len(obs_corr), len(shuffled_mean))
+                        if min_len % 2 == 0:
+                            min_len -= 1
+                        center_obs = len(obs_corr) // 2
+                        center_shuf = len(shuffled_mean) // 2
+
+                        obs_corr = obs_corr[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
+                        shuffled_mean = shuffled_mean[center_shuf - min_len // 2: center_shuf + min_len // 2 + 1]
+                        lags = lags[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
+
+                        delta = obs_corr - shuffled_mean
+                        delta_dict[monkey_pair].append(delta)
+                        lag_dict[monkey_pair] = lags
+
+                    except Exception as e:
+                        self.logger.warning(f"Error in {session} run {run}: {e}")
+                        continue
+
+                for monkey_pair, deltas in delta_dict.items():
+                    if not deltas:
+                        continue
+                    min_len = min(len(d) for d in deltas)
+                    if min_len < 2:
+                        self.logger.warning(f"Too short vectors for {monkey_pair}, skipping")
+                        continue
+
+                    truncated_deltas = np.stack([d[:min_len] for d in deltas])
+                    lags = lag_dict[monkey_pair][:min_len]
+
+                    mean_delta = truncated_deltas.mean(axis=0)
+                    t_stat, p_vals = ttest_1samp(truncated_deltas, popmean=0, axis=0, nan_policy="omit")
+
+                    results.append({
+                        "comparison": comparison_name,
+                        "period_type": period_type,
+                        "monkey_pair": monkey_pair,
+                        "lags": lags,
+                        "mean_delta": mean_delta,
+                        "t_stat": t_stat,
+                        "p_values": p_vals,
+                        "n_runs": len(deltas)
+                    })
+
+        self.save_crosscorr_analysis_results(results)
+        return results
+
+    def save_crosscorr_analysis_results(self, results):
+        """
+        Saves results to: config.output_dir/results/mean_minus_shuffled_crosscorr_results.pkl
+        """
+        out_dir = self.config.output_dir / "results"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "mean_minus_shuffled_crosscorr_results.pkl"
+
+        pd.to_pickle(results, out_path)
+        print(f"✅ Saved delta crosscorr results to {out_path}")
+
+
+
+
+
+
+
+
     def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:
         path = get_crosscorr_output_path(self.config, comparison_name)
         if not os.path.exists(path):
@@ -563,3 +700,76 @@ def _construct_shuffled_vector(segments: List[Tuple[int, int]], run_length: int)
             vec[idx:end] = 1
         idx += dur
     return vec
+
+
+
+
+
+
+
+
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from collections import defaultdict
+from datetime import datetime
+import numpy as np
+
+def plot_crosscorr_deltas_combined(results, config, alpha=0.05):
+    """
+    For each monkey pair:
+        - One figure.
+        - Rows = period_type.
+        - Each subplot overlays all comparisons with unique color.
+    Saves to: config.output_dir/plots/mean_minus_shuffled_crosscorr/<date>/
+    """
+    grouped = defaultdict(list)
+    for res in results:
+        pair_key = f"{res['monkey_pair'][0]}-{res['monkey_pair'][1]}"
+        grouped[pair_key].append(res)
+
+    plot_dir = config.output_dir / "plots" / "mean_minus_shuffled_crosscorr" / datetime.now().strftime("%Y-%m-%d")
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    for monkey_pair, res_list in grouped.items():
+        comparisons = sorted(set(r["comparison"] for r in res_list))
+        periods = sorted(set(r["period_type"] for r in res_list))
+
+        # Assign a unique color to each comparison
+        cmap = cm.get_cmap("tab10", len(comparisons))
+        comp_color_map = {comp: cmap(i) for i, comp in enumerate(comparisons)}
+
+        fig, axes = plt.subplots(len(periods), 1, figsize=(8, 3.5 * len(periods)), squeeze=False)
+
+        for i, period_type in enumerate(periods):
+            ax = axes[i][0]
+            for r in res_list:
+                if r["period_type"] != period_type:
+                    continue
+
+                comp = r["comparison"]
+                color = comp_color_map[comp]
+                label = comp.replace("__vs__", " vs ")
+
+                ax.plot(r["lags"], r["mean_delta"], label=label, color=color, linewidth=1.5)
+
+                sig_mask = (r["p_values"] < alpha) & (r["mean_delta"] > 0)
+                if np.any(sig_mask):
+                    ax.scatter(r["lags"][sig_mask], r["mean_delta"][sig_mask],
+                               s=12, marker='o', color=color, edgecolor='k', linewidths=0.4, alpha=0.7)
+
+            ax.axhline(0, linestyle="--", color="gray", linewidth=0.8)
+            ax.set_title(f"{period_type.capitalize()} periods", fontsize=12)
+            ax.set_xlabel("Lag (ms)")
+            ax.set_ylabel("Δ Crosscorr")
+            ax.legend(fontsize=8, loc='upper right', frameon=True)
+            ax.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
+
+        plt.suptitle(f"Δ Crosscorr | Monkey Pair: {monkey_pair}", fontsize=14)
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+        fname = f"{monkey_pair.replace('-', '_')}_crosscorr_deltas_combined.png"
+        plt.savefig(plot_dir / fname, dpi=150)
+        plt.close()
+
+    print(f"All plots saved to: {plot_dir}")
+

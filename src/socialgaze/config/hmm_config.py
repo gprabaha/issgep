@@ -1,10 +1,10 @@
 # src/socialgaze/config/hmm_config.py
 
-from socialgaze.config.crosscorr_config import CrossCorrConfig
+from socialgaze.config.base_config import BaseConfig
 
-class HMMConfig(CrossCorrConfig):
-    def __init__(self, config_path: str = None):
-        super().__init__(config_path)
+class HMMConfig(BaseConfig):
+    def __init__(self):
+        super().__init__()
 
         # HMM-specific options
         self.binary_vector_types_to_use: list = [

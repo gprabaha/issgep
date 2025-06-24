@@ -13,8 +13,8 @@ from pathlib import Path
 
 
 class CrossCorrConfig(FixationConfig):
-    def __init__(self, config_path: str = None):
-        super().__init__(config_path)
+    def __init__(self):
+        super().__init__()
 
         # === Analysis parameters ===
         self.use_parallel: bool = True
