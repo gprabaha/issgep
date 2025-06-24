@@ -3,8 +3,9 @@
 import os
 from pathlib import Path
 from typing import Dict, Union
-import datetime
 from datetime import date
+from collections import defaultdict
+from typing import Dict, List, Tuple, Optional
 
 # --------------------
 # == Root paths ==
@@ -258,34 +259,6 @@ def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
 def get_interactivity_df_path(config, fixation_type='face') -> Path:
     return config.processed_data_dir / "interactive_periods.pkl"
 
-
-# == CrossCorr Paths ==
-
-def get_crosscorr_job_file_path(config) -> Path:
-    return config.project_root / "jobs" / "scripts" / "crosscorr_jobs.tsv"
-
-
-def get_crosscorr_worker_script_path(project_root: Path) -> Path:
-    return project_root / "scripts" / "behav_analysis" / "04_inter_agent_crosscorr.py"
-
-
-def get_crosscorr_output_path(config, comparison_name: str) -> Path:
-    """
-    Constructs the full output path for a cross-correlation dataframe.
-
-    Args:
-        config: Config object containing base output directory info.
-        comparison_name: String identifying the comparison (e.g., 'm1_face_fixation__vs__m2_saccade_to_face').
-
-    Returns:
-        Path object pointing to the intended .pkl file.
-    """
-    base_dir = Path(config.output_dir)
-    out_dir = base_dir / "crosscorr"
-    return out_dir / f"{comparison_name}.pkl"
-
-def get_crosscorr_shuffled_output_dir(config) -> Path:
-    return Path(config.output_dir) / "crosscorr_shuffled"
 
 # == PSTH paths ==
  
@@ -576,3 +549,117 @@ def join_folder_and_filename(folder: Union[str, Path], filename: str) -> Path:
         Path: The combined file path.
     """
     return Path(folder) / filename
+
+
+from socialgaze.config.crosscorr_config import CrossCorrConfig
+
+class CrossCorrPaths:
+    """
+    Centralized path and filename generator for cross-correlation analysis.
+    All file naming conventions and directory logic should be encapsulated here.
+    """
+
+    def __init__(self, config: CrossCorrConfig):
+        self.config = config
+
+    # === Job script and worker path ===
+    def get_job_file_path(self) -> Path:
+        return self.config.project_root / "jobs" / "scripts" / "crosscorr_jobs.tsv"
+
+    def get_worker_script_path(self) -> Path:
+        return self.config.project_root / "scripts" / "behav_analysis" / "04_inter_agent_crosscorr.py"
+
+    # === Output base directories ===
+    def get_output_dir(self) -> Path:
+        return Path(self.config.output_dir) / "crosscorr"
+
+    def get_shuffled_output_dir(self) -> Path:
+        return Path(self.config.output_dir) / "crosscorr_shuffled"
+
+    def get_temp_dir(self) -> Path:
+        return self.config.crosscorr_shuffled_temp_dir
+
+    # === Observed cross-correlation filenames and paths ===
+
+    def get_comparison_name(self, a1: str, b1: str, a2: str, b2: str) -> str:
+        return f"{a1}_{b1}__vs__{a2}_{b2}"
+
+    def get_obs_crosscorr_filename(self, a1, b1, a2, b2, period_type: str) -> str:
+        name = self.get_comparison_name(a1, b1, a2, b2)
+        if period_type != "full":
+            name += f"__{period_type}"
+        return f"{name}.pkl"
+
+    def get_obs_crosscorr_path(self, a1, b1, a2, b2, period_type: str) -> Path:
+        return self.get_output_dir() / self.get_obs_crosscorr_filename(a1, b1, a2, b2, period_type)
+
+    def get_obs_crosscorr_path_by_name(self, comparison_name: str) -> Path:
+        return self.get_output_dir() / f"{comparison_name}.pkl"
+
+    # === Shuffled cross-correlation file logic ===
+    def get_shuffled_temp_filename(self, session, run, a1, b1, a2, b2, period_type: str) -> str:
+        name = self.get_comparison_name(a1, b1, a2, b2)
+        return f"{name}__{period_type}__{session}__run{run}.pkl"
+
+    def get_shuffled_temp_path(self, session, run, a1, b1, a2, b2, period_type: str) -> Path:
+        return self.get_temp_dir() / self.get_shuffled_temp_filename(session, run, a1, b1, a2, b2, period_type)
+
+    def get_shuffled_final_filename(self, a1, b1, a2, b2, period_type: str) -> str:
+        name = f"{a1}_{b1}__vs__{a2}_{b2}"
+        if period_type != "full":
+            name += f"__{period_type}"
+        return f"{name}.pkl"
+
+    def get_shuffled_final_path(self, a1, b1, a2, b2, period_type: str) -> Path:
+        return self.get_shuffled_output_dir() / self.get_shuffled_final_filename(a1, b1, a2, b2, period_type)
+
+    def parse_shuffled_temp_filename(self, path: Path) -> Optional[Tuple[str, str, str, str, str, str, str]]:
+        """
+        Parses a shuffled temp filename and returns its components:
+        (a1, b1, a2, b2, period_type, session, run)
+        Example filename:
+        m1_face_fixation__vs__m2_face_fixation__full__20200101__run3.pkl
+        """
+        parts = path.stem.split("__")  # removes .pkl and splits
+        if len(parts) != 6 or parts[2] not in {"full", "interactive", "non_interactive"}:
+            logger.warning(f"Unexpected temp filename format: {path.name}")
+            return None
+
+        try:
+            a1_b1 = parts[0]
+            a2_b2 = parts[2] if parts[1] == "vs" else parts[1]
+            a1, b1 = a1_b1.split("_", 1)
+            a2, b2 = a2_b2.split("_", 1)
+            period_type = parts[2]
+            session = parts[3]
+            run = parts[4].replace("run", "")
+        except Exception as e:
+            logger.warning(f"Failed to parse temp file '{path.name}': {e}")
+            return None
+
+        return a1, b1, a2, b2, period_type, session, run
+    
+
+    def get_grouped_shuffled_temp_paths(self) -> Dict[Tuple[str, str, str, str, str], List[Path]]:
+        """
+        Scans the temp shuffled directory and groups files by (a1, b1, a2, b2, period_type).
+        
+        Returns:
+            Dictionary mapping group_key -> list of .pkl Paths.
+        """
+        grouped_paths: Dict[Tuple[str, str, str, str, str], List[Path]] = defaultdict(list)
+
+        for path in self.get_temp_dir().glob("*.pkl"):
+            parsed = self.parse_shuffled_temp_filename(path)
+            if parsed is None:
+                continue
+            a1, b1, a2, b2, period_type, session, run = parsed
+            group_key = (a1, b1, a2, b2, period_type)
+            grouped_paths[group_key].append(path)
+
+        return grouped_paths
+
+
+    # === Final results file ===
+    def get_analysis_output_path(self) -> Path:
+        return Path(self.config.output_dir) / "results" / "mean_minus_shuffled_crosscorr_results.pkl"

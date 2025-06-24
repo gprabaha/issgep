@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Optional, Dict, List, Tuple
 from glob import glob
+from pathlib import Path
 
 import random
 import pandas as pd
@@ -18,7 +19,6 @@ from collections import defaultdict
 from socialgaze.config.crosscorr_config import CrossCorrConfig
 from socialgaze.features.fixation_detector import FixationDetector
 from socialgaze.features.interactivity_detector import InteractivityDetector
-from socialgaze.utils.path_utils import get_crosscorr_output_path
 from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.utils.saving_utils import save_df_to_pkl
 from socialgaze.utils.hpc_utils import (
@@ -26,6 +26,7 @@ from socialgaze.utils.hpc_utils import (
     submit_dsq_array_job,
     track_job_completion
 )
+from socialgaze.utils.path_utils import CrossCorrPaths
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class CrossCorrCalculator:
         self.config = config
         self.fixation_detector = fixation_detector
         self.interactivity_detector = interactivity_detector
+        self.paths = CrossCorrPaths(config)
 
 
     def compute_crosscorrelations(self, by_interactivity_period: bool = False):
@@ -117,10 +119,9 @@ class CrossCorrCalculator:
 
                 if all_rows:
                     full_df = pd.concat(all_rows, ignore_index=True)
-                    name = f"{a1}_{b1}__vs__{a2}_{b2}"
-                    if period_type != "full":
-                        name += f"_{period_type}"
-                    _save_crosscorr_df(full_df, name, self.config)
+                    out_path = self.paths.get_obs_crosscorr_path(a1, b1, a2, b2, period_type)
+                    save_df_to_pkl(full_df, out_path)
+                    logger.info(f"Saved observed crosscorr df to: {out_path}")
 
         logger.info("Cross-correlation computation complete.")
 
@@ -284,67 +285,42 @@ class CrossCorrCalculator:
         # --- Save temporary results ---
         if all_rows:
             out_df = pd.concat(all_rows, ignore_index=True)
-            name = f"{a1}_{b1}__vs__{a2}_{b2}__{period_type}"
             pd.set_option("display.width", 0)
             pd.set_option("display.max_columns", None)
             logger.info(f"Resultant dataframe for {name}:\n{out_df.head()}")
 
-            temp_dir = self.config.crosscorr_shuffled_temp_dir
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            out_path = temp_dir / f"{name}__{session}__run{run}.pkl"
-            out_df.to_pickle(out_path)
+            out_path = self.paths.get_shuffled_temp_path(session, run, a1, b1, a2, b2, period_type)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            save_df_to_pkl(out_df, out_path)
             logger.info(f"Saved TEMP shuffled result: {out_path}")
-
 
 
     def combine_and_save_shuffled_results(self):
         """
-        Combines all temp run-level shuffled crosscorr files into one file per 
-        (agent1, behavior1, agent2, behavior2, period_type) and saves to output.
-        Temp files are removed after saving.
+        Combines run-level shuffled crosscorr files into one file per (a1, b1, a2, b2, period_type)
+        using grouped temp paths from CrossCorrPaths. Deletes temp files after combining.
         """
-        temp_dir = self.config.crosscorr_shuffled_temp_dir
-        output_dir = self.config.crosscorr_shuffled_output_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
 
-        grouped_paths: Dict[str, List[str]] = {}
-        for path in glob(str(temp_dir / "*.pkl")):
-            filename = os.path.basename(path)
-            parts = filename.replace(".pkl", "").split("__")
-            
-            # Example: "m1_face_fixation__vs__m2_face_fixation__full__20200101__run1.pkl"
-            if len(parts) < 6:
-                logger.warning(f"Unexpected filename format: {filename}")
-                continue
-            # group_key = "m1_face_fixation__vs__m2_face_fixation__full"
-            group_key = "__".join(parts[:4])
-            grouped_paths.setdefault(group_key, []).append(path)
+        grouped_paths = self.paths.get_grouped_shuffled_temp_paths()
 
-        for group_key, file_list in grouped_paths.items():
+        for (a1, b1, a2, b2, period_type), file_list in grouped_paths.items():
             dfs = [pd.read_pickle(f) for f in file_list]
             combined = pd.concat(dfs, ignore_index=True)
+
             pd.set_option("display.width", 0)
             pd.set_option("display.max_columns", None)
-            logger.info(f"Resultant dataframe for {group_key}:\n{combined.head()}")
-            out_path = output_dir / f"{group_key}.pkl"
-            combined.to_pickle(out_path)
-            logger.info(f"Saved COMBINED shuffled cross-correlation for {group_key} to: {out_path}")
+            logger.info(f"Resultant dataframe for {a1}_{b1} vs {a2}_{b2} [{period_type}]:\n{combined.head()}")
 
-            # Clean up
+            out_path = self.paths.get_shuffled_final_path(a1, b1, a2, b2, period_type)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            combined.to_pickle(out_path)
+            logger.info(f"Saved COMBINED shuffled cross-correlation to: {out_path}")
+
             for f in file_list:
                 os.remove(f)
                 logger.debug(f"Deleted temp file: {f}")
 
 
-
-
-
-
-
-    from scipy.stats import ttest_1samp
-    from collections import defaultdict
-    import numpy as np
-    import pandas as pd
 
     def analyze_crosscorr_vs_shuffled_per_pair(self):
         """
@@ -356,25 +332,22 @@ class CrossCorrCalculator:
         pd.set_option("display.max_columns", None)
         pd.set_option("display.width", 0)
 
-        session_to_monkey_pair = self.config.ephys_days_and_monkeys.set_index("session_name")[["m1", "m2"]].to_dict("index")
+        session_to_monkey_pair = self.config.ephys_days_and_monkeys_df.set_index("session_name")[["m1", "m2"]].to_dict("index")
 
         for a1, b1, a2, b2 in self.config.crosscorr_agent_behavior_pairs:
             for period_type in ["full", "interactive", "non_interactive"]:
-                comparison_name = f"{a1}_{b1}__vs__{a2}_{b2}"
-                group_key = comparison_name if period_type == "full" else f"{comparison_name}__{period_type}"
-
-                obs_path = self.config.crosscorr_output_dir / f"{comparison_name}__{period_type}.pkl"
-                shuffled_path = self.config.crosscorr_shuffled_output_dir / f"{group_key}.pkl"
+                obs_path = self.paths.get_obs_crosscorr_path(a1, b1, a2, b2, period_type)
+                shuffled_path = self.paths.get_shuffled_final_path(a1, b1, a2, b2, period_type)
 
                 if not obs_path.exists() or not shuffled_path.exists():
-                    self.logger.warning(f"Missing observed or shuffled file for {group_key}")
+                    logger.warning(f"Missing observed or shuffled file for {a1}-{b1} vs {a2}-{b2} [{period_type}]")
                     continue
 
                 try:
                     observed_df = pd.read_pickle(obs_path)
                     shuffled_df = pd.read_pickle(shuffled_path)
                 except Exception as e:
-                    self.logger.warning(f"Error loading {group_key}: {e}")
+                    logger.warning(f"Error loading data for {a1}-{b1} vs {a2}-{b2} [{period_type}]: {e}")
                     continue
 
                 obs_groups = observed_df.groupby(["session_name", "run_number"])
@@ -388,20 +361,19 @@ class CrossCorrCalculator:
                     run = str(run)
 
                     if session not in session_to_monkey_pair:
-                        self.logger.warning(f"No monkey ID info for session {session}")
+                        logger.warning(f"No monkey ID info for session {session}")
                         continue
                     monkey_pair = tuple(session_to_monkey_pair[session].values())
 
                     try:
                         shuffle_group = shuffle_groups.get_group((session, run))
                     except KeyError:
-                        self.logger.warning(f"No shuffled data for session {session} run {run}")
+                        logger.warning(f"No shuffled data for session {session} run {run}")
                         continue
 
                     try:
-                        obs_sorted = obs_group.sort_values("lag")
-                        lags = obs_sorted["lag"].values
-                        obs_corr = obs_sorted["crosscorr"].values
+                        lags = obs_group.iloc[0]["lag"]
+                        obs_corr = obs_group.iloc[0]["crosscorr"]
 
                         # Shuffled vector is stored as a row with single array
                         shuffled_mean = shuffle_group.iloc[0]["crosscorr_mean"]
@@ -422,7 +394,7 @@ class CrossCorrCalculator:
                         lag_dict[monkey_pair] = lags
 
                     except Exception as e:
-                        self.logger.warning(f"Error in {session} run {run}: {e}")
+                        logger.warning(f"Error computing delta for session {session} run {run}: {e}")
                         continue
 
                 for monkey_pair, deltas in delta_dict.items():
@@ -430,7 +402,7 @@ class CrossCorrCalculator:
                         continue
                     min_len = min(len(d) for d in deltas)
                     if min_len < 2:
-                        self.logger.warning(f"Too short vectors for {monkey_pair}, skipping")
+                        logger.warning(f"Too short vectors for {monkey_pair}, skipping")
                         continue
 
                     truncated_deltas = np.stack([d[:min_len] for d in deltas])
@@ -440,7 +412,7 @@ class CrossCorrCalculator:
                     t_stat, p_vals = ttest_1samp(truncated_deltas, popmean=0, axis=0, nan_policy="omit")
 
                     results.append({
-                        "comparison": comparison_name,
+                        "comparison": self.paths.get_comparison_name(a1, b1, a2, b2),
                         "period_type": period_type,
                         "monkey_pair": monkey_pair,
                         "lags": lags,
@@ -453,29 +425,16 @@ class CrossCorrCalculator:
         self.save_crosscorr_analysis_results(results)
         return results
 
+
     def save_crosscorr_analysis_results(self, results):
         """
         Saves results to: config.output_dir/results/mean_minus_shuffled_crosscorr_results.pkl
         """
-        out_dir = self.config.output_dir / "results"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / "mean_minus_shuffled_crosscorr_results.pkl"
-
+        out_path = self.paths.get_analysis_output_path()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         pd.to_pickle(results, out_path)
-        print(f"✅ Saved delta crosscorr results to {out_path}")
+        print(f"Saved delta crosscorr results to {out_path}")
 
-
-
-
-
-
-
-
-    def load_crosscorr_df(self, comparison_name: str) -> pd.DataFrame:
-        path = get_crosscorr_output_path(self.config, comparison_name)
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Cross-correlation result not found at: {path}")
-        return load_df_from_pkl(path)
 
 
 # ------------------------
@@ -539,8 +498,8 @@ def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2
             "agent2": a2,
             "behavior1": b1,
             "behavior2": b2,
-            "lag": lags,
-            "crosscorr": corr,
+            "lags": [lags],
+            "crosscorr": [corr],
             "period_type": period_type
         })
         all_rows.append(rows)

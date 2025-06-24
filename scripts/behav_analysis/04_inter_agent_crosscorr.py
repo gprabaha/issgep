@@ -62,8 +62,10 @@ def main():
     else:
         # calculator.compute_crosscorrelations(by_interactivity_period=False)
         # calculator.compute_crosscorrelations(by_interactivity_period=True)
-        calculator.compute_shuffled_crosscorrelations(by_interactivity_period=False)
-        calculator.compute_shuffled_crosscorrelations(by_interactivity_period=True)
+        # calculator.compute_shuffled_crosscorrelations(by_interactivity_period=False)
+        # calculator.compute_shuffled_crosscorrelations(by_interactivity_period=True)
+        
+        calculator.analyze_crosscorr_vs_shuffled_per_pair()
 
 
 if __name__ == "__main__":

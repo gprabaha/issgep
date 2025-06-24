@@ -2,6 +2,7 @@
 
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.utils.path_utils import (
+    get_crosscorr_output_dir,
     get_crosscorr_shuffled_output_dir,
     get_crosscorr_worker_script_path,
     get_job_file_path,
@@ -21,7 +22,6 @@ class CrossCorrConfig(FixationConfig):
         self.show_inner_tqdm: bool = True
         self.binary_vector_types_to_use: list = (
             "face_fixation",
-            "saccade_to_face",
             "saccade_from_face"
         )
         self.crosscorr_agent_behavior_pairs = [
@@ -37,11 +37,6 @@ class CrossCorrConfig(FixationConfig):
         self.make_shuffle_stringent: bool = True
         self.num_shuffles: int = 1000
         self.run_single_test_case: bool = False
-
-        # === Output paths ===
-        self.crosscorr_shuffled_output_dir = get_crosscorr_shuffled_output_dir(self)
-        self.crosscorr_shuffled_temp_dir = self.crosscorr_shuffled_output_dir / "temp"
-        self.crosscorr_shuffled_temp_dir.mkdir(parents=True, exist_ok=True)
 
         # === HPC job config (overriding fixation config) ===
         self.job_name = "crosscorr_shuffled"
