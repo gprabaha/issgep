@@ -118,7 +118,7 @@ class CrossCorrCalculator:
                         for (session, run), run_df in group_iter
                     ]
 
-                all_rows = [row for batch in results if batch for row in batch]
+                all_rows = [df for df in results if isinstance(df, pd.DataFrame)]
 
                 if all_rows:
                     full_df = pd.concat(all_rows, ignore_index=True)
@@ -504,32 +504,57 @@ def _compute_complement_periods(included: np.ndarray, total: List[tuple]) -> Lis
         complement.append((current, total[0][1]))
     return complement
 
+
 def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2, period_type, config):
-    all_rows = []
+    """
+    Computes cross-correlation across the union of all valid periods by filling zero-initialized
+    vectors and computing a single cross-correlation on the result.
+
+    Args:
+        session (str): Session name.
+        run (str): Run number.
+        a1, a2 (str): Agent names.
+        b1, b2 (str): Behavior types.
+        periods (list of tuples): List of (start, stop) indices.
+        v1, v2 (np.ndarray): Binary vectors for agent1 and agent2.
+        period_type (str): Period type ('full', 'interactive', etc.).
+        config: Configuration object containing parameters like max_lag.
+
+    Returns:
+        pd.DataFrame: Single-row dataframe with cross-correlation result.
+    """
+    full_seg1 = np.zeros_like(v1, dtype=np.float32)
+    full_seg2 = np.zeros_like(v2, dtype=np.float32)
+
     for start, stop in periods:
-        seg1 = v1[start:stop + 1]
-        seg2 = v2[start:stop + 1]
-        if len(seg1) < 2 or len(seg2) < 2:
+        if start >= len(v1) or stop >= len(v1) or start >= len(v2) or stop >= len(v2):
+            logger.warning(f"Skipping invalid period ({start}, {stop}) for session {session}, run {run}")
             continue
-        lags, corr = _compute_normalized_crosscorr(
-            seg1, seg2,
-            max_lag=None,
-            normalize=config.normalize,
-            use_energy_norm=config.use_energy_norm
-        )
-        rows = pd.DataFrame({
-            "session_name": session,
-            "run_number": run,
-            "agent1": a1,
-            "agent2": a2,
-            "behavior1": b1,
-            "behavior2": b2,
-            "lags": [lags],
-            "crosscorr": [corr],
-            "period_type": period_type
-        })
-        all_rows.append(rows)
-    return all_rows
+        full_seg1[start:stop + 1] = v1[start:stop + 1]
+        full_seg2[start:stop + 1] = v2[start:stop + 1]
+
+    lags, corr = _compute_normalized_crosscorr(
+        full_seg1,
+        full_seg2,
+        max_lag=config.max_lag,
+        normalize=config.normalize,
+        use_energy_norm=config.use_energy_norm
+    )
+
+    df = pd.DataFrame({
+        "session_name": [session],
+        "run_number": [run],
+        "agent1": [a1],
+        "agent2": [a2],
+        "behavior1": [b1],
+        "behavior2": [b2],
+        "lags": [lags],
+        "crosscorr": [corr],
+        "period_type": [period_type]
+    })
+
+    return df
+
 
 
 def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: Optional[int] = None, normalize: bool = True, use_energy_norm: bool = False):
