@@ -10,7 +10,7 @@ class CrossCorrConfig(BaseConfig):
         super().__init__()
 
         # === Analysis parameters ===
-        self.use_parallel: bool = False
+        self.use_parallel: bool = True
         self.show_inner_tqdm: bool = True
         self.binary_vector_types_to_use: list = (
             "face_fixation",
@@ -28,7 +28,7 @@ class CrossCorrConfig(BaseConfig):
         self.use_energy_norm: bool = True
         self.make_shuffle_stringent: bool = True
         self.num_shuffles: int = 1000
-        self.run_single_test_case: bool = True
+        self.run_single_test_case: bool = False
 
         # === HPC job config (overriding fixation config) ===
         self.job_name = "crosscorr_shuffled"
