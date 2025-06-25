@@ -173,106 +173,59 @@ class CrossCorrCalculator:
 
 
     def compute_shuffled_crosscorrelations_for_single_run(self, session, run, a1, b1, a2, b2, period_type="full"):
-        """
-        Computes shuffled cross-correlations for a single session/run and saves to a temp file.
-
-        Args:
-            session (str): Session name.
-            run (str or int): Run number (will be coerced to str).
-            a1, b1 (str): Agent 1 and their behavior type.
-            a2, b2 (str): Agent 2 and their behavior type.
-            period_type (str): One of "full", "interactive", or "non_interactive".
-        """
-        # --- Normalize inputs ---
         session = str(session).strip()
         run = str(run).strip()
-        a1 = a1.lower().strip()
-        b1 = b1.strip()
-        a2 = a2.lower().strip()
-        b2 = b2.strip()
+        a1, b1 = a1.lower().strip(), b1.strip()
+        a2, b2 = a2.lower().strip(), b2.strip()
 
-        logger.info(
-            f"Computing shuffled crosscorr: session={session}, run={run}, "
-            f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}"
-        )
+        logger.info(f"Computing shuffled crosscorr: session={session}, run={run}, "
+                    f"a1={a1}, b1={b1}, a2={a2}, b2={b2}, period_type={period_type}")
 
-        # --- Load binary vectors ---
-        try:
-            df1 = self.fixation_detector.get_binary_vector_df(b1)
-            df2 = df1 if b1 == b2 else self.fixation_detector.get_binary_vector_df(b2)
-        except FileNotFoundError:
-            logger.warning(f"Missing binary vector: {b1} or {b2}")
-            return
-
-        for df in [df1, df2]:
-            df["agent"] = df["agent"].str.lower().str.strip()
-            df["session_name"] = df["session_name"].str.strip()
-            df["run_number"] = df["run_number"].astype(str).str.strip()
-
-        df1 = df1[(df1["agent"] == a1) & (df1["session_name"] == session) & (df1["run_number"] == run)]
-        df2 = df2[(df2["agent"] == a2) & (df2["session_name"] == session) & (df2["run_number"] == run)]
-
-        if df1.empty or df2.empty:
-            logger.warning(f"No data for session {session}, run {run}")
-            return
-
-        run_df = pd.concat([df1, df2], ignore_index=True)
-        v1, v2 = _get_vectors_for_run(run_df, a1, b1, a2, b2)
+        # --- Load vectors ---
+        v1, v2 = self._load_and_prepare_vectors_for_run(session, run, a1, b1, a2, b2)
         if v1 is None or v2 is None:
             return
 
-        # --- Get interactivity periods ---
-        inter_df = self.interactivity_detector.load_interactivity_periods() if period_type != "full" else None
-        periods = [(0, len(v1) - 1)] if period_type == "full" else _get_periods_for_run(
-            inter_df, session, run, period_type, len(v1)
-        )
+        # --- Get periods ---
+        periods = self._get_valid_periods_for_run(session, run, period_type, len(v1))
         if not periods:
-            logger.warning(f"No valid periods for session {session}, run {run}, period_type={period_type}")
             return
 
-        # --- Shuffle and compute cross-correlations ---
-        logger.info(f"Computing shuffled cross-correlation with {self.config.num_shuffles} iterations")
+        # --- Prepare shuffle jobs ---
+        shuffle_args = [(v1, v2, periods, self.config) for _ in range(self.config.num_shuffles)]
 
-        all_corrs = []
-        for shuffle_idx in range(self.config.num_shuffles):
-            full_vec1 = np.zeros_like(v1, dtype=int)
-            full_vec2 = np.zeros_like(v2, dtype=int)
+        # --- Compute shuffled correlations ---
+        logger.info(f"Running {self.config.num_shuffles} shuffles "
+                    f"{'in parallel' if self.config.use_parallel else 'serially'}")
 
-            for start, stop in periods:
-                seg1 = v1[start:stop + 1]
-                seg2 = v2[start:stop + 1]
-                if len(seg1) < 2 or len(seg2) < 2:
-                    continue
+        if self.config.use_parallel:
+            corrs = list(tqdm(
+                Parallel(n_jobs=self.config.num_cpus)(
+                    delayed(_compute_one_shuffled_crosscorr_for_run)(*args)
+                    for args in shuffle_args
+                ),
+                total=self.config.num_shuffles,
+                desc="Shuffled crosscorr (parallel)"
+            ))
+        else:
+            corrs = [
+                _compute_one_shuffled_crosscorr_for_run(*args)
+                for args in tqdm(shuffle_args, desc="Shuffled crosscorr (serial)")
+            ]
 
-                try:
-                    shuffled_seg1 = _generate_one_shuffled_vector_for_segment(
-                        seg1, len(seg1), self.config.make_shuffle_stringent
-                    )
-                    shuffled_seg2 = _generate_one_shuffled_vector_for_segment(
-                        seg2, len(seg2), self.config.make_shuffle_stringent
-                    )
-                    full_vec1[start:stop + 1] = shuffled_seg1
-                    full_vec2[start:stop + 1] = shuffled_seg2
-                except Exception as e:
-                    logger.warning(f"Shuffling failed at period {start}-{stop} in {session}-{run}: {e}")
-                    continue
-
-            # Compute cross-correlation
-            lags, corr = _compute_normalized_crosscorr(
-                full_vec1,
-                full_vec2,
-                max_lag=None,
-                normalize=self.config.normalize,
-                use_energy_norm=self.config.use_energy_norm,
-            )
-            all_corrs.append(corr)
-
-        if not all_corrs:
+        if not corrs:
             logger.warning(f"No cross-correlation results for session={session}, run={run}")
             return
 
-        # --- Aggregate results ---
-        corr_values = np.stack(all_corrs)
+        # --- Extract lags and summarize ---
+        lags, _ = _compute_normalized_crosscorr(
+            np.zeros_like(v1), np.zeros_like(v2),
+            max_lag=None,
+            normalize=self.config.normalize,
+            use_energy_norm=self.config.use_energy_norm,
+        )
+
+        corr_values = np.stack(corrs)
         mean_corr = np.mean(corr_values, axis=0)
         std_corr = np.std(corr_values, axis=0)
 
@@ -283,17 +236,15 @@ class CrossCorrCalculator:
             "agent2": a2,
             "behavior1": b1,
             "behavior2": b2,
-            "lags": [lags],
+            "lag": [lags],
             "crosscorr_mean": [mean_corr],
             "crosscorr_std": [std_corr],
             "period_type": period_type
         })
 
-        logger.info(
-            f"Resultant dataframe for session={session}, run={run}, period_type={period_type}:\n{out_df.head()}"
-        )
+        logger.info(f"Finished session={session}, run={run}, period_type={period_type}\n{out_df.head()}")
 
-        # --- Save result ---
+        # --- Save output ---
         out_path = self.paths.get_shuffled_temp_path(session, run, a1, b1, a2, b2, period_type)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         save_df_to_pkl(out_df, out_path)
@@ -447,6 +398,7 @@ class CrossCorrCalculator:
 # Cross-correlation helpers
 # ------------------------
 
+
 def _process_one_session_run_crosscorr(session, run, run_df, a1, b1, a2, b2, period_type, inter_df, config):
     v1, v2 = _get_vectors_for_run(run_df, a1, b1, a2, b2)
     if v1 is None or v2 is None:
@@ -586,6 +538,83 @@ def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: Optiona
 # ------------------------
 # Shuffling-related helpers
 # ------------------------
+
+
+def _load_and_prepare_vectors_for_run(self, session, run, a1, b1, a2, b2):
+    try:
+        df1 = self.fixation_detector.get_binary_vector_df(b1)
+        df2 = df1 if b1 == b2 else self.fixation_detector.get_binary_vector_df(b2)
+    except FileNotFoundError:
+        logger.warning(f"Missing binary vector: {b1} or {b2}")
+        return None, None
+
+    for df in [df1, df2]:
+        df["agent"] = df["agent"].str.lower().str.strip()
+        df["session_name"] = df["session_name"].str.strip()
+        df["run_number"] = df["run_number"].astype(str).str.strip()
+
+    df1 = df1[(df1["agent"] == a1) & (df1["session_name"] == session) & (df1["run_number"] == run)]
+    df2 = df2[(df2["agent"] == a2) & (df2["session_name"] == session) & (df2["run_number"] == run)]
+
+    if df1.empty or df2.empty:
+        logger.warning(f"No data for session {session}, run {run}")
+        return None, None
+
+    run_df = pd.concat([df1, df2], ignore_index=True)
+    return _get_vectors_for_run(run_df, a1, b1, a2, b2)
+
+
+def _get_valid_periods_for_run(self, session, run, period_type, vector_length):
+    if period_type == "full":
+        return [(0, vector_length - 1)]
+
+    inter_df = self.interactivity_detector.load_interactivity_periods()
+    periods = _get_periods_for_run(inter_df, session, run, period_type, vector_length)
+    
+    if not periods:
+        logger.warning(f"No valid periods for session={session}, run={run}, period_type={period_type}")
+    return periods
+
+
+def _compute_one_shuffled_crosscorr_for_run(
+    v1: np.ndarray,
+    v2: np.ndarray,
+    periods: List[Tuple[int, int]],
+    config
+) -> np.ndarray:
+    """
+    Generates one pair of full-length shuffled vectors and computes cross-correlation.
+    """
+    full_vec1 = np.zeros_like(v1, dtype=int)
+    full_vec2 = np.zeros_like(v2, dtype=int)
+
+    for start, stop in periods:
+        seg1 = v1[start:stop + 1]
+        seg2 = v2[start:stop + 1]
+        if len(seg1) < 2 or len(seg2) < 2:
+            continue
+
+        try:
+            shuffled_seg1 = _generate_one_shuffled_vector_for_segment(
+                seg1, len(seg1), config.make_shuffle_stringent
+            )
+            shuffled_seg2 = _generate_one_shuffled_vector_for_segment(
+                seg2, len(seg2), config.make_shuffle_stringent
+            )
+            full_vec1[start:stop + 1] = shuffled_seg1
+            full_vec2[start:stop + 1] = shuffled_seg2
+        except Exception as e:
+            logger.warning(f"Shuffling failed at period {start}-{stop}: {e}")
+            continue
+
+    lags, corr = _compute_normalized_crosscorr(
+        full_vec1,
+        full_vec2,
+        max_lag=None,
+        normalize=config.normalize,
+        use_energy_norm=config.use_energy_norm,
+    )
+    return corr
 
 
 def _generate_one_shuffled_vector_for_segment(
