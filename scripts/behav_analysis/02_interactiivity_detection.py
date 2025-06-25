@@ -47,7 +47,8 @@ def main():
 
     # Compute and save interactivity periods
     logger.info("Extracting interactivity periods...")
-    detector.compute_interactivity_periods()
+    overwrite = True
+    detector.compute_interactivity_periods(overwrite)
     detector.save_interactivity_periods()
     logger.info("Interactivity periods computed and saved.")
 

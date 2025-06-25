@@ -297,14 +297,20 @@ def normalize_density(arr):
 
 
 def _get_interactive_periods(binary_vector):
+    """
+    Returns a list of (start, stop) indices where stop is inclusive.
+    Safe for use with: v[start:stop+1]
+    """
     vec = np.asarray(binary_vector, dtype=int)
     if np.all(vec == 0):
         return []
 
     padded = np.pad(vec, (1, 1), constant_values=0)
     change_indices = np.flatnonzero(np.diff(padded))
+
     starts = change_indices[::2]
-    stops = change_indices[1::2]
-    stops = np.minimum(stops, len(vec) - 1)  # Clamp at valid index
+    stops = change_indices[1::2] - 1  # make 'stop' inclusive
+
     return list(zip(starts, stops))
+
 
