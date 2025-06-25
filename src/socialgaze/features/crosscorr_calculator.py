@@ -135,9 +135,7 @@ class CrossCorrCalculator:
         """
         Prepares and submits a SLURM job array to compute shuffled cross-correlations
         for all session/run and agent-behavior combinations.
-
         If config.run_single_test_case is True, only one randomly selected task is executed locally.
-        
         Args:
             by_interactivity_period (bool): Whether to compute per-period (interactive vs. non-interactive).
         """
@@ -188,7 +186,9 @@ class CrossCorrCalculator:
 
         # --- Get periods ---
         periods = self._get_valid_periods_for_run(session, run, period_type, len(v1))
-        if not periods:
+
+        if periods is None or len(periods) == 0:
+            logger.warning("No valid periods")
             return
 
         # --- Prepare shuffle jobs ---
@@ -220,7 +220,7 @@ class CrossCorrCalculator:
         # --- Extract lags and summarize ---
         lags, _ = _compute_normalized_crosscorr(
             np.zeros_like(v1), np.zeros_like(v2),
-            max_lag=None,
+            max_lag=self.config.max_lag,
             normalize=self.config.normalize,
             use_energy_norm=self.config.use_energy_norm,
         )
@@ -250,6 +250,41 @@ class CrossCorrCalculator:
         save_df_to_pkl(out_df, out_path)
         logger.info(f"Saved TEMP shuffled result: {out_path}")
 
+
+    def _load_and_prepare_vectors_for_run(self, session, run, a1, b1, a2, b2):
+        try:
+            df1 = self.fixation_detector.get_binary_vector_df(b1)
+            df2 = df1 if b1 == b2 else self.fixation_detector.get_binary_vector_df(b2)
+        except FileNotFoundError:
+            logger.warning(f"Missing binary vector: {b1} or {b2}")
+            return None, None
+
+        for df in [df1, df2]:
+            df["agent"] = df["agent"].str.lower().str.strip()
+            df["session_name"] = df["session_name"].str.strip()
+            df["run_number"] = df["run_number"].astype(str).str.strip()
+
+        df1 = df1[(df1["agent"] == a1) & (df1["session_name"] == session) & (df1["run_number"] == run)]
+        df2 = df2[(df2["agent"] == a2) & (df2["session_name"] == session) & (df2["run_number"] == run)]
+
+        if df1.empty or df2.empty:
+            logger.warning(f"No data for session {session}, run {run}")
+            return None, None
+
+        run_df = pd.concat([df1, df2], ignore_index=True)
+        return _get_vectors_for_run(run_df, a1, b1, a2, b2)
+
+
+    def _get_valid_periods_for_run(self, session, run, period_type, vector_length):
+        if period_type == "full":
+            return [(0, vector_length - 1)]
+
+        inter_df = self.interactivity_detector.load_interactivity_periods()
+        periods = _get_periods_for_run(inter_df, session, run, period_type, vector_length)
+        
+        if periods is None or len(periods) == 0:
+            logger.warning(f"No valid periods for session={session}, run={run}, period_type={period_type}")
+        return periods
 
 
     def combine_and_save_shuffled_results(self):
@@ -540,42 +575,6 @@ def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: Optiona
 # ------------------------
 
 
-def _load_and_prepare_vectors_for_run(self, session, run, a1, b1, a2, b2):
-    try:
-        df1 = self.fixation_detector.get_binary_vector_df(b1)
-        df2 = df1 if b1 == b2 else self.fixation_detector.get_binary_vector_df(b2)
-    except FileNotFoundError:
-        logger.warning(f"Missing binary vector: {b1} or {b2}")
-        return None, None
-
-    for df in [df1, df2]:
-        df["agent"] = df["agent"].str.lower().str.strip()
-        df["session_name"] = df["session_name"].str.strip()
-        df["run_number"] = df["run_number"].astype(str).str.strip()
-
-    df1 = df1[(df1["agent"] == a1) & (df1["session_name"] == session) & (df1["run_number"] == run)]
-    df2 = df2[(df2["agent"] == a2) & (df2["session_name"] == session) & (df2["run_number"] == run)]
-
-    if df1.empty or df2.empty:
-        logger.warning(f"No data for session {session}, run {run}")
-        return None, None
-
-    run_df = pd.concat([df1, df2], ignore_index=True)
-    return _get_vectors_for_run(run_df, a1, b1, a2, b2)
-
-
-def _get_valid_periods_for_run(self, session, run, period_type, vector_length):
-    if period_type == "full":
-        return [(0, vector_length - 1)]
-
-    inter_df = self.interactivity_detector.load_interactivity_periods()
-    periods = _get_periods_for_run(inter_df, session, run, period_type, vector_length)
-    
-    if not periods:
-        logger.warning(f"No valid periods for session={session}, run={run}, period_type={period_type}")
-    return periods
-
-
 def _compute_one_shuffled_crosscorr_for_run(
     v1: np.ndarray,
     v2: np.ndarray,
@@ -607,10 +606,10 @@ def _compute_one_shuffled_crosscorr_for_run(
             logger.warning(f"Shuffling failed at period {start}-{stop}: {e}")
             continue
 
-    lags, corr = _compute_normalized_crosscorr(
+    _, corr = _compute_normalized_crosscorr(
         full_vec1,
         full_vec2,
-        max_lag=None,
+        max_lag=config.max_lag,
         normalize=config.normalize,
         use_energy_norm=config.use_energy_norm,
     )
@@ -638,7 +637,7 @@ def _generate_one_shuffled_vector_for_segment(
     return _generate_single_shuffled_vector(fixation_durations, non_fix_dur, segment_length, stringent)
 
 
-def _generate_shuffled_vectors_for_run(
+def _generate_shuffled_vectors_for_run_in_parallel(
     original_vector: np.ndarray,
     run_length: int,
     num_shuffles: int,
