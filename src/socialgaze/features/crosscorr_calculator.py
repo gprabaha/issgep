@@ -162,6 +162,7 @@ class CrossCorrCalculator:
             test_task = random.choice(tasks)
             logger.info(f"Running single test task: {test_task}")
             self.compute_shuffled_crosscorrelations_for_single_run(*test_task)
+            # self.combine_and_save_shuffled_results()
             return
 
         generate_crosscorr_job_file(tasks, self.config)
@@ -346,7 +347,7 @@ class CrossCorrCalculator:
                 shuffle_groups = shuffled_df.groupby(["session_name", "run_number"])
 
                 delta_dict = defaultdict(list)
-                lag_dict = {}
+                lags_dict = {}
 
                 for (session, run), obs_group in obs_groups:
                     session = str(session)
@@ -364,27 +365,27 @@ class CrossCorrCalculator:
                         continue
 
                     try:
-                        lags = obs_group.iloc[0]["lag"]
+                        lags = obs_group.iloc[0]["lags"]
                         obs_corr = obs_group.iloc[0]["crosscorr"]
-
+                        
                         # Shuffled vector is stored as a row with single array
                         shuffled_mean = shuffle_group.iloc[0]["crosscorr_mean"]
 
                         # Ensure symmetry
-                        min_len = min(len(obs_corr), len(shuffled_mean))
-                        if min_len % 2 == 0:
-                            min_len -= 1
-                        center_obs = len(obs_corr) // 2
-                        center_shuf = len(shuffled_mean) // 2
+                        # min_len = min(len(obs_corr), len(shuffled_mean))
+                        # if min_len % 2 == 0:
+                        #     min_len -= 1
+                        # center_obs = len(obs_corr) // 2
+                        # center_shuf = len(shuffled_mean) // 2
 
-                        obs_corr = obs_corr[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
-                        shuffled_mean = shuffled_mean[center_shuf - min_len // 2: center_shuf + min_len // 2 + 1]
-                        lags = lags[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
+                        # obs_corr = obs_corr[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
+                        # shuffled_mean = shuffled_mean[center_shuf - min_len // 2: center_shuf + min_len // 2 + 1]
+                        # lags = lags[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
 
                         delta = obs_corr - shuffled_mean
                         delta_dict[monkey_pair].append(delta)
-                        lag_dict[monkey_pair] = lags
-
+                        lags_dict[monkey_pair] = lags
+                        
                     except Exception as e:
                         logger.warning(f"Error computing delta for session {session} run {run}: {e}")
                         continue
@@ -397,8 +398,8 @@ class CrossCorrCalculator:
                         logger.warning(f"Too short vectors for {monkey_pair}, skipping")
                         continue
 
-                    truncated_deltas = np.stack([d[:min_len] for d in deltas])
-                    lags = lag_dict[monkey_pair][:min_len]
+                    truncated_deltas = np.stack([d for d in deltas])
+                    lags = lags_dict[monkey_pair]
 
                     mean_delta = truncated_deltas.mean(axis=0)
                     t_stat, p_vals = ttest_1samp(truncated_deltas, popmean=0, axis=0, nan_policy="omit")

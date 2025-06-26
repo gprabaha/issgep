@@ -38,7 +38,7 @@ class CrossCorrConfig(BaseConfig):
         self.partition = "day" if self.is_grace else "psych_day"
         self.cpus_per_task = 8
         self.mem_per_cpu = 4000
-        self.time_limit = "00:10:00"
+        self.time_limit = "00:05:00"
 
         self.paths = CrossCorrPaths(self)
         # Assign paths specific to this job

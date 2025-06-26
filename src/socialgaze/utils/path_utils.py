@@ -1,5 +1,6 @@
 # src/socialgaze/utils/path_utils.py
 
+import pdb
 import logging
 import os
 from pathlib import Path
@@ -617,28 +618,30 @@ class CrossCorrPaths:
         """
         Parses a shuffled temp filename and returns its components:
         (a1, b1, a2, b2, period_type, session, run)
-        Example filename:
-        m1_face_fixation__vs__m2_face_fixation__full__20200101__run3.pkl
+
+        Example:
+            m1_face_fixation__vs__m2_face_fixation__full__20200101__run3.pkl
+        Returns:
+            ('m1', 'face_fixation', 'm2', 'face_fixation', 'full', '20200101', '3')
         """
-        parts = path.stem.split("__")  # removes .pkl and splits
-        if len(parts) != 6 or parts[2] not in {"full", "interactive", "non_interactive"}:
+        parts = path.stem.split("__")
+
+        if len(parts) != 6 or parts[1] != "vs" or parts[3] not in {"full", "interactive", "non_interactive"}:
             logger.warning(f"Unexpected temp filename format: {path.name}")
             return None
 
         try:
-            a1_b1 = parts[0]
-            a2_b2 = parts[2] if parts[1] == "vs" else parts[1]
-            a1, b1 = a1_b1.split("_", 1)
-            a2, b2 = a2_b2.split("_", 1)
-            period_type = parts[2]
-            session = parts[3]
-            run = parts[4].replace("run", "")
+            a1, b1 = parts[0].split("_", 1)
+            a2, b2 = parts[2].split("_", 1)
+            period_type = parts[3]
+            session = parts[4]
+            run = parts[5].replace("run", "")
         except Exception as e:
             logger.warning(f"Failed to parse temp file '{path.name}': {e}")
             return None
 
         return a1, b1, a2, b2, period_type, session, run
-    
+
 
     def get_grouped_shuffled_temp_paths(self) -> Dict[Tuple[str, str, str, str, str], List[Path]]:
         """
@@ -649,8 +652,9 @@ class CrossCorrPaths:
         """
         grouped_paths: Dict[Tuple[str, str, str, str, str], List[Path]] = defaultdict(list)
 
-        for path in self.get_temp_dir().glob("*.pkl"):
+        for path in self.get_shuffled_temp_dir().glob("*.pkl"):
             parsed = self.parse_shuffled_temp_filename(path)
+
             if parsed is None:
                 continue
             a1, b1, a2, b2, period_type, session, run = parsed
