@@ -4,8 +4,7 @@ import pdb
 import logging
 import os
 from typing import Optional, Dict, List, Tuple
-from glob import glob
-from pathlib import Path
+from collections import defaultdict
 
 import random
 import pandas as pd
@@ -14,7 +13,8 @@ from tqdm import tqdm
 from scipy.signal import fftconvolve
 from joblib import Parallel, delayed
 from scipy.stats import ttest_1samp
-from collections import defaultdict
+from matplotlib import pyplot as plt
+from matplotlib import cm
 
 from socialgaze.config.crosscorr_config import CrossCorrConfig
 from socialgaze.features.fixation_detector import FixationDetector
@@ -314,14 +314,13 @@ class CrossCorrCalculator:
                 logger.debug(f"Deleted temp file: {f}")
 
 
-
     def analyze_crosscorr_vs_shuffled_per_pair(self):
         """
         Compares observed vs shuffled crosscorrelations for each behavior pair and period,
         grouped by monkey identity pairs from self.config.ephys_days_and_monkeys.
-        Handles lag truncation and saves full results.
+        Handles lag truncation and saves full results as a DataFrame.
         """
-        results = []
+        all_rows = []
         pd.set_option("display.max_columns", None)
         pd.set_option("display.width", 0)
 
@@ -367,25 +366,11 @@ class CrossCorrCalculator:
                     try:
                         lags = obs_group.iloc[0]["lags"]
                         obs_corr = obs_group.iloc[0]["crosscorr"]
-                        
-                        # Shuffled vector is stored as a row with single array
                         shuffled_mean = shuffle_group.iloc[0]["crosscorr_mean"]
-
-                        # Ensure symmetry
-                        # min_len = min(len(obs_corr), len(shuffled_mean))
-                        # if min_len % 2 == 0:
-                        #     min_len -= 1
-                        # center_obs = len(obs_corr) // 2
-                        # center_shuf = len(shuffled_mean) // 2
-
-                        # obs_corr = obs_corr[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
-                        # shuffled_mean = shuffled_mean[center_shuf - min_len // 2: center_shuf + min_len // 2 + 1]
-                        # lags = lags[center_obs - min_len // 2: center_obs + min_len // 2 + 1]
 
                         delta = obs_corr - shuffled_mean
                         delta_dict[monkey_pair].append(delta)
                         lags_dict[monkey_pair] = lags
-                        
                     except Exception as e:
                         logger.warning(f"Error computing delta for session {session} run {run}: {e}")
                         continue
@@ -398,25 +383,31 @@ class CrossCorrCalculator:
                         logger.warning(f"Too short vectors for {monkey_pair}, skipping")
                         continue
 
-                    truncated_deltas = np.stack([d for d in deltas])
+                    truncated_deltas = np.stack(deltas)
                     lags = lags_dict[monkey_pair]
 
                     mean_delta = truncated_deltas.mean(axis=0)
                     t_stat, p_vals = ttest_1samp(truncated_deltas, popmean=0, axis=0, nan_policy="omit")
 
-                    results.append({
+                    all_rows.append({
                         "comparison": self.paths.get_comparison_name(a1, b1, a2, b2),
                         "period_type": period_type,
                         "monkey_pair": monkey_pair,
-                        "lags": lags,
+                        "lags": lags,  # store arrays in list to keep as single cell
                         "mean_delta": mean_delta,
                         "t_stat": t_stat,
                         "p_values": p_vals,
                         "n_runs": len(deltas)
                     })
 
-        self.save_crosscorr_analysis_results(results)
-        return results
+        result_df = pd.DataFrame(all_rows)
+        if not result_df.empty:
+            logger.info(f"Cross-correlation Δ results (first 5 rows):\n{result_df.head()}")
+        else:
+            logger.warning("No cross-correlation Δ results computed.")
+
+        self.save_crosscorr_analysis_results(result_df)
+        return result_df
 
 
     def save_crosscorr_analysis_results(self, results):
@@ -429,6 +420,97 @@ class CrossCorrCalculator:
         print(f"Saved delta crosscorr results to {out_path}")
 
 
+    def plot_crosscorr_deltas_combined(self, results_df: pd.DataFrame = None, alpha: float = 0.05):
+        """
+        For each monkey pair:
+            - One figure.
+            - Rows = period_type.
+            - Each subplot overlays all comparisons with unique color.
+            - Significant portions are plotted with higher opacity and thickness.
+            - x-axis is in seconds, limited to ±15s.
+
+        Saves to: self.config.paths.get_crosscorr_deltas_plot_dir()
+        """
+        if results_df is None:
+            results_path = self.paths.get_analysis_output_path()
+            results_df = load_df_from_pkl(results_path)
+
+        grouped = defaultdict(list)
+        for _, row in results_df.iterrows():
+            pair_key = f"{row['monkey_pair'][0]}-{row['monkey_pair'][1]}"
+            grouped[pair_key].append(row)
+
+        plot_dir = self.config.paths.get_crosscorr_deltas_plot_dir()
+        plot_dir.mkdir(parents=True, exist_ok=True)
+
+        for monkey_pair, res_list in grouped.items():
+            comparisons = sorted(set(r["comparison"] for r in res_list))
+            periods = sorted(set(r["period_type"] for r in res_list))
+
+            cmap = cm.get_cmap("tab10", len(comparisons))
+            comp_color_map = {comp: cmap(i) for i, comp in enumerate(comparisons)}
+
+            fig, axes = plt.subplots(len(periods), 1, figsize=(8, 3.5 * len(periods)), squeeze=False)
+
+            for i, period_type in enumerate(periods):
+                ax = axes[i][0]
+                for r in res_list:
+                    if r["period_type"] != period_type:
+                        continue
+
+                    comp = r["comparison"]
+                    color = comp_color_map[comp]
+                    label = comp.replace("__vs__", " vs ")
+
+                    lags_sec, mean_delta, p_values, sig_mask = self._prepare_lags_and_delta_for_plotting(r, alpha)
+                    self._plot_crosscorr_result_on_ax(ax, lags_sec, mean_delta, p_values, sig_mask, color, label)
+
+                # Axis lines
+                ax.axhline(0, linestyle="-", color="black", linewidth=0.9)
+                ax.axvline(0, linestyle="-", color="black", linewidth=0.9)
+
+                ax.set_title(f"{period_type.capitalize()} periods", fontsize=12)
+                ax.set_xlabel("Lag (s)")
+                ax.set_ylabel("Δ Crosscorr")
+                if i == 0:
+                    ax.legend(fontsize=8, loc='upper right', frameon=True)
+                ax.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
+
+            plt.suptitle(f"Δ Crosscorr | Monkey Pair: {monkey_pair}", fontsize=14)
+            plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+            fname = f"{monkey_pair.replace('-', '_')}_crosscorr_deltas_combined.png"
+            plt.savefig(plot_dir / fname, dpi=200)
+            plt.close()
+
+        logger.info(f"All Δ crosscorr plots saved to: {plot_dir}")
+
+
+    def _prepare_lags_and_delta_for_plotting(self, r, alpha):
+        lags = r["lags"][0] if isinstance(r["lags"], list) else r["lags"]
+        mean_delta = r["mean_delta"][0] if isinstance(r["mean_delta"], list) else r["mean_delta"]
+        p_values = r["p_values"][0] if isinstance(r["p_values"], list) else r["p_values"]
+
+        # Trim to ±15 sec (assuming 1kHz sampling)
+        lag_mask = (lags >= -15000) & (lags <= 15000)
+        lags_sec = lags[lag_mask] / 1000.0
+        mean_delta = mean_delta[lag_mask]
+        p_values = p_values[lag_mask]
+        sig_mask = (p_values < alpha) & (mean_delta > 0)
+
+        return lags_sec, mean_delta, p_values, sig_mask
+
+
+    def _plot_crosscorr_result_on_ax(self, ax, lags_sec, mean_delta, p_values, sig_mask, color, label):
+        # Plot base line (all points, faded)
+        ax.plot(lags_sec, mean_delta, label=label, color=color, linewidth=1.2, alpha=0.5)
+
+        # Overlay bold segments where significant
+        if np.any(sig_mask):
+            sig_indices = np.where(sig_mask)[0]
+            chunks = np.split(sig_indices, np.where(np.diff(sig_indices) > 1)[0] + 1)
+            for chunk in chunks:
+                ax.plot(lags_sec[chunk], mean_delta[chunk], color=color, linewidth=2.5, alpha=1.0)
 
 # ------------------------
 # Cross-correlation helpers

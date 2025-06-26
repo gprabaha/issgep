@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Dict, Union
 from datetime import date
+from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
 
@@ -666,3 +667,13 @@ class CrossCorrPaths:
     # === Final results file ===
     def get_analysis_output_path(self) -> Path:
         return Path(self.config.output_dir) / "results" / "mean_minus_shuffled_crosscorr_results.pkl"
+    
+
+    def get_crosscorr_deltas_plot_dir(self) -> Path:
+        """
+        Returns the directory for Δ crosscorr plots.
+        Structure: <output_dir>/plots/mean_minus_shuffled_crosscorr/<YYYY-MM-DD>/
+        """
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        return Path(self.config.output_dir) / "plots" / "mean_minus_shuffled_crosscorr" / date_str
+
