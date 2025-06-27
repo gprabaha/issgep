@@ -566,54 +566,71 @@ class CrossCorrPaths:
     def __init__(self, config):
         self.config = config
 
+
     # === Job script and worker path ===
+
     def get_job_file_path(self, job_file_name) -> Path:
         return self.config.project_root / "jobs" / "scripts" / job_file_name
+
 
     def get_worker_script_path(self) -> Path:
         return self.config.project_root / "scripts" / "behav_analysis" / "04_inter_agent_crosscorr.py"
 
+
     # === Output base directories ===
+
     def get_output_dir(self) -> Path:
         return Path(self.config.output_dir) / "crosscorr"
+
 
     def get_shuffled_output_dir(self) -> Path:
         return Path(self.config.output_dir) / "crosscorr_shuffled"
 
+
     def get_shuffled_temp_dir(self) -> Path:
         return self.get_shuffled_output_dir() / "temp"
+
 
     # === Observed cross-correlation filenames and paths ===
 
     def get_comparison_name(self, a1: str, b1: str, a2: str, b2: str) -> str:
         return f"{a1}_{b1}__vs__{a2}_{b2}"
 
+
     def get_obs_crosscorr_filename(self, a1, b1, a2, b2, period_type: str) -> str:
         name = self.get_comparison_name(a1, b1, a2, b2)
         name += f"__{period_type}"
         return f"{name}.pkl"
 
+
     def get_obs_crosscorr_path(self, a1, b1, a2, b2, period_type: str) -> Path:
         return self.get_output_dir() / self.get_obs_crosscorr_filename(a1, b1, a2, b2, period_type)
+
 
     def get_obs_crosscorr_path_by_name(self, comparison_name: str) -> Path:
         return self.get_output_dir() / f"{comparison_name}.pkl"
 
+
     # === Shuffled cross-correlation file logic ===
+
     def get_shuffled_temp_filename(self, session, run, a1, b1, a2, b2, period_type: str) -> str:
         name = self.get_comparison_name(a1, b1, a2, b2)
         return f"{name}__{period_type}__{session}__run{run}.pkl"
 
+
     def get_shuffled_temp_path(self, session, run, a1, b1, a2, b2, period_type: str) -> Path:
         return self.get_shuffled_temp_dir() / self.get_shuffled_temp_filename(session, run, a1, b1, a2, b2, period_type)
+
 
     def get_shuffled_final_filename(self, a1, b1, a2, b2, period_type: str) -> str:
         name = self.get_comparison_name(a1, b1, a2, b2)
         name += f"__{period_type}"
         return f"{name}.pkl"
 
+
     def get_shuffled_final_path(self, a1, b1, a2, b2, period_type: str) -> Path:
         return self.get_shuffled_output_dir() / self.get_shuffled_final_filename(a1, b1, a2, b2, period_type)
+
 
     def parse_shuffled_temp_filename(self, path: Path) -> Optional[Tuple[str, str, str, str, str, str, str]]:
         """
@@ -664,10 +681,12 @@ class CrossCorrPaths:
 
         return grouped_paths
 
+
     # === Final results file ===
+
     def get_analysis_output_path(self) -> Path:
         return Path(self.config.output_dir) / "results" / "mean_minus_shuffled_crosscorr_results.pkl"
-    
+
 
     def get_crosscorr_deltas_plot_dir(self) -> Path:
         """

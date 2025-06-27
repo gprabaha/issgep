@@ -423,11 +423,11 @@ class CrossCorrCalculator:
     def plot_crosscorr_deltas_combined(self, results_df: pd.DataFrame = None, alpha: float = 0.05):
         """
         For each monkey pair:
-            - One figure.
-            - Rows = period_type.
-            - Each subplot overlays all comparisons with unique color.
-            - Significant portions are plotted with higher opacity and thickness.
-            - x-axis is in seconds, limited to ±15s.
+            - Grid: rows = period_type, columns = face_vs_face vs other comparisons.
+            - Each subplot overlays comparisons with unique colors.
+            - Significant parts plotted bold.
+            - x-axis in seconds, ±15s.
+            - Shared Y within rows only.
 
         Saves to: self.config.paths.get_crosscorr_deltas_plot_dir()
         """
@@ -447,13 +447,20 @@ class CrossCorrCalculator:
             comparisons = sorted(set(r["comparison"] for r in res_list))
             periods = sorted(set(r["period_type"] for r in res_list))
 
-            cmap = cm.get_cmap("tab10", len(comparisons))
+            cmap = cm.get_cmap("rainbow", len(comparisons))
             comp_color_map = {comp: cmap(i) for i, comp in enumerate(comparisons)}
 
-            fig, axes = plt.subplots(len(periods), 1, figsize=(8, 3.5 * len(periods)), squeeze=False)
+            _, axes = plt.subplots(
+                nrows=len(periods), ncols=2,
+                figsize=(12, 3.5 * len(periods)),
+                sharey='col',
+                squeeze=False
+            )
 
             for i, period_type in enumerate(periods):
-                ax = axes[i][0]
+                ax_face = axes[i][0]
+                ax_other = axes[i][1]
+
                 for r in res_list:
                     if r["period_type"] != period_type:
                         continue
@@ -463,27 +470,46 @@ class CrossCorrCalculator:
                     label = comp.replace("__vs__", " vs ")
 
                     lags_sec, mean_delta, p_values, sig_mask = self._prepare_lags_and_delta_for_plotting(r, alpha)
+
+                    # Determine where to plot
+                    if (
+                        ("m1_face_fixation" in comp and "m2_face_fixation" in comp)
+                    ):
+                        ax = ax_face
+                    else:
+                        ax = ax_other
+
                     self._plot_crosscorr_result_on_ax(ax, lags_sec, mean_delta, p_values, sig_mask, color, label)
 
-                # Axis lines
-                ax.axhline(0, linestyle="-", color="black", linewidth=0.9)
-                ax.axvline(0, linestyle="-", color="black", linewidth=0.9)
+                # --- Axis lines ---
+                for ax in [ax_face, ax_other]:
+                    ax.axhline(0, linestyle="-", color="black", linewidth=0.9)
+                    ax.axvline(0, linestyle="-", color="black", linewidth=0.9)
 
-                ax.set_title(f"{period_type.capitalize()} periods", fontsize=12)
-                ax.set_xlabel("Lag (s)")
-                ax.set_ylabel("Δ Crosscorr")
+                ax_face.set_title(f"{period_type.capitalize()} | m1_face vs m2_face", fontsize=11)
+                ax_other.set_title(f"{period_type.capitalize()} | Other comparisons", fontsize=11)
+
+                ax_face.set_xlabel("Lag (s)")
+                ax_other.set_xlabel("Lag (s)")
+
+                ax_face.set_ylabel("Δ Crosscorr")
+
                 if i == 0:
-                    ax.legend(fontsize=8, loc='upper right', frameon=True)
-                ax.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
+                    ax_face.legend(fontsize=7, loc='upper right', frameon=True)
+                    ax_other.legend(fontsize=7, loc='upper right', frameon=True)
+
+                for ax in [ax_face, ax_other]:
+                    ax.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
 
             plt.suptitle(f"Δ Crosscorr | Monkey Pair: {monkey_pair}", fontsize=14)
             plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-            fname = f"{monkey_pair.replace('-', '_')}_crosscorr_deltas_combined.png"
+            fname = f"{monkey_pair.replace('-', '_')}_crosscorr_deltas_combined_grid.png"
             plt.savefig(plot_dir / fname, dpi=200)
             plt.close()
 
-        logger.info(f"All Δ crosscorr plots saved to: {plot_dir}")
+        logger.info(f"All Δ crosscorr grid plots saved to: {plot_dir}")
+
 
 
     def _prepare_lags_and_delta_for_plotting(self, r, alpha):
@@ -815,76 +841,4 @@ def _construct_shuffled_vector(segments: List[Tuple[int, int]], run_length: int)
             vec[idx:end] = 1
         idx += dur
     return vec
-
-
-
-
-
-
-
-
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-from collections import defaultdict
-from datetime import datetime
-import numpy as np
-
-def plot_crosscorr_deltas_combined(results, config, alpha=0.05):
-    """
-    For each monkey pair:
-        - One figure.
-        - Rows = period_type.
-        - Each subplot overlays all comparisons with unique color.
-    Saves to: config.output_dir/plots/mean_minus_shuffled_crosscorr/<date>/
-    """
-    grouped = defaultdict(list)
-    for res in results:
-        pair_key = f"{res['monkey_pair'][0]}-{res['monkey_pair'][1]}"
-        grouped[pair_key].append(res)
-
-    plot_dir = config.output_dir / "plots" / "mean_minus_shuffled_crosscorr" / datetime.now().strftime("%Y-%m-%d")
-    plot_dir.mkdir(parents=True, exist_ok=True)
-
-    for monkey_pair, res_list in grouped.items():
-        comparisons = sorted(set(r["comparison"] for r in res_list))
-        periods = sorted(set(r["period_type"] for r in res_list))
-
-        # Assign a unique color to each comparison
-        cmap = cm.get_cmap("tab10", len(comparisons))
-        comp_color_map = {comp: cmap(i) for i, comp in enumerate(comparisons)}
-
-        fig, axes = plt.subplots(len(periods), 1, figsize=(8, 3.5 * len(periods)), squeeze=False)
-
-        for i, period_type in enumerate(periods):
-            ax = axes[i][0]
-            for r in res_list:
-                if r["period_type"] != period_type:
-                    continue
-
-                comp = r["comparison"]
-                color = comp_color_map[comp]
-                label = comp.replace("__vs__", " vs ")
-
-                ax.plot(r["lags"], r["mean_delta"], label=label, color=color, linewidth=1.5)
-
-                sig_mask = (r["p_values"] < alpha) & (r["mean_delta"] > 0)
-                if np.any(sig_mask):
-                    ax.scatter(r["lags"][sig_mask], r["mean_delta"][sig_mask],
-                               s=12, marker='o', color=color, edgecolor='k', linewidths=0.4, alpha=0.7)
-
-            ax.axhline(0, linestyle="--", color="gray", linewidth=0.8)
-            ax.set_title(f"{period_type.capitalize()} periods", fontsize=12)
-            ax.set_xlabel("Lag (ms)")
-            ax.set_ylabel("Δ Crosscorr")
-            ax.legend(fontsize=8, loc='upper right', frameon=True)
-            ax.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
-
-        plt.suptitle(f"Δ Crosscorr | Monkey Pair: {monkey_pair}", fontsize=14)
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-
-        fname = f"{monkey_pair.replace('-', '_')}_crosscorr_deltas_combined.png"
-        plt.savefig(plot_dir / fname, dpi=150)
-        plt.close()
-
-    print(f"All plots saved to: {plot_dir}")
 
