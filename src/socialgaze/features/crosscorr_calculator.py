@@ -3,7 +3,7 @@
 import pdb
 import logging
 import os
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Optional, List, Tuple
 from collections import defaultdict
 
 import random
@@ -11,8 +11,9 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from scipy.signal import fftconvolve
-from joblib import Parallel, delayed
+from scipy.ndimage import gaussian_filter1d
 from scipy.stats import ttest_1samp
+from joblib import Parallel, delayed
 from matplotlib import pyplot as plt
 from matplotlib import cm
 
@@ -220,10 +221,9 @@ class CrossCorrCalculator:
 
         # --- Extract lags and summarize ---
         lags, _ = _compute_normalized_crosscorr(
-            np.zeros_like(v1), np.zeros_like(v2),
-            max_lag=self.config.max_lag,
-            normalize=self.config.normalize,
-            use_energy_norm=self.config.use_energy_norm,
+            np.zeros_like(v1),
+            np.zeros_like(v2),
+            config
         )
 
         corr_values = np.stack(corrs)
@@ -538,6 +538,7 @@ class CrossCorrCalculator:
             for chunk in chunks:
                 ax.plot(lags_sec[chunk], mean_delta[chunk], color=color, linewidth=2.5, alpha=1.0)
 
+
 # ------------------------
 # Cross-correlation helpers
 # ------------------------
@@ -626,9 +627,7 @@ def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2
     lags, corr = _compute_normalized_crosscorr(
         full_seg1,
         full_seg2,
-        max_lag=config.max_lag,
-        normalize=config.normalize,
-        use_energy_norm=config.use_energy_norm
+        config
     )
 
     df = pd.DataFrame({
@@ -646,22 +645,45 @@ def _compute_crosscorr_for_periods(session, run, a1, a2, b1, b2, periods, v1, v2
     return df
 
 
-
-def _compute_normalized_crosscorr(x: np.ndarray, y: np.ndarray, max_lag: Optional[int] = None, normalize: bool = True, use_energy_norm: bool = False):
+def _compute_normalized_crosscorr(
+    x: np.ndarray,
+    y: np.ndarray,
+    config
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Computes normalized cross-correlation between x and y.
+    Parameters are controlled via config:
+      - config.max_lag
+      - config.normalize
+      - config.use_energy_norm
+      - config.do_smoothing
+      - config.smoothing_sigma_n_bins
+    """
     x = x.astype(float)
     y = y.astype(float)
+
+    # --- Optional smoothing ---
+    if getattr(config, "do_smoothing", False):
+        sigma = getattr(config, "smoothing_sigma_n_bins", 1)
+        x = gaussian_filter1d(x, sigma=sigma, mode='reflect')
+        y = gaussian_filter1d(y, sigma=sigma, mode='reflect')
+
+    # --- Cross-correlation ---
     corr_full = fftconvolve(x, y[::-1], mode="full")
     lags_full = np.arange(-len(y) + 1, len(x))
     corr = corr_full
     lags = lags_full
 
+    # --- Lag limit ---
+    max_lag = getattr(config, "max_lag", None)
     if max_lag is not None:
         center = len(corr_full) // 2
         corr = corr_full[center - max_lag:center + max_lag + 1]
         lags = lags_full[center - max_lag:center + max_lag + 1]
 
-    if normalize:
-        if use_energy_norm:
+    # --- Normalization ---
+    if getattr(config, "normalize", True):
+        if getattr(config, "use_energy_norm", True):
             norm = np.sqrt(np.sum(x ** 2) * np.sum(y ** 2))
             if norm > 0:
                 corr /= norm
@@ -718,9 +740,7 @@ def _compute_one_shuffled_crosscorr_for_run(
     _, corr = _compute_normalized_crosscorr(
         full_vec1,
         full_vec2,
-        max_lag=config.max_lag,
-        normalize=config.normalize,
-        use_energy_norm=config.use_energy_norm,
+        config
     )
     return corr
 

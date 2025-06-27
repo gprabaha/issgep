@@ -1,6 +1,5 @@
 # src/socialgaze/config/crosscorr_config.py
 
-import pdb
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.utils.path_utils import CrossCorrPaths, get_job_out_dir, get_log_dir, get_sbatch_script_path
 
@@ -9,12 +8,15 @@ class CrossCorrConfig(BaseConfig):
     def __init__(self):
         super().__init__()
 
-        # === Analysis parameters ===
+        # === General execution ===
         self.use_parallel: bool = True
         self.show_inner_tqdm: bool = True
+        self.run_single_test_case: bool = False
+
+        # === Binary vector + agent/behavior pair config ===
         self.binary_vector_types_to_use: list = (
             "face_fixation",
-            "saccade_from_face"
+            "saccade_from_face",
         )
         self.crosscorr_agent_behavior_pairs = [
             ("m1", "face_fixation", "m2", "face_fixation"),
@@ -23,14 +25,19 @@ class CrossCorrConfig(BaseConfig):
             ("m2", "face_fixation", "m1", "saccade_to_face"),
             ("m2", "face_fixation", "m1", "saccade_from_face"),
         ]
-        self.max_lag: int = 30000  # 30 seconds at 1 kHz
+
+        # === Cross-correlation parameters ===
+        self.max_lag: int = 30000  # 30 sec at 1 kHz
         self.normalize: bool = True
         self.use_energy_norm: bool = True
-        self.make_shuffle_stringent: bool = True
-        self.num_shuffles: int = 1000
-        self.run_single_test_case: bool = False
 
-        # === HPC job config (overriding fixation config) ===
+        # === Shuffle + smoothing ===
+        self.num_shuffles: int = 1000
+        self.make_shuffle_stringent: bool = True
+        self.do_smoothing: bool = True
+        self.smoothing_sigma_n_bins: int = 2
+
+        # === HPC job configuration ===
         self.job_name = "crosscorr_shuffled"
         self.job_file_name = "crosscorr_shuffled_job_array.txt"
         self.python_script_relative = "scripts/behav_analysis/04_inter_agent_crosscorr.py"
@@ -40,8 +47,8 @@ class CrossCorrConfig(BaseConfig):
         self.mem_per_cpu = 4000
         self.time_limit = "00:05:00"
 
+        # === Paths ===
         self.paths = CrossCorrPaths(self)
-        # Assign paths specific to this job
         self._assign_paths()
 
     def _assign_paths(self):
