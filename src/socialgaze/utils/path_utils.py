@@ -555,7 +555,55 @@ def join_folder_and_filename(folder: Union[str, Path], filename: str) -> Path:
     return Path(folder) / filename
 
 
+########################
+## PSTH related paths ##
+########################
 
+class PSTHPaths:
+    """
+    Centralized path generator for PSTH dataframes and plots.
+    """
+
+    def __init__(self, config):
+        self.config = config
+
+    # === Processed data outputs ===
+
+    def get_psth_output_dir(self) -> Path:
+        """
+        Base directory for processed PSTH .pkl files.
+        """
+        return Path(self.config.processed_data_dir) / "psth"
+
+    def get_psth_per_trial_path(self) -> Path:
+        return self.get_psth_output_dir() / "psth_per_trial.pkl"
+
+    def get_avg_face_obj_path(self) -> Path:
+        return self.get_psth_output_dir() / "avg_face_obj.pkl"
+
+    def get_avg_int_non_int_face_path(self) -> Path:
+        return self.get_psth_output_dir() / "avg_int_non_int_face.pkl"
+
+    # === Plots ===
+
+    def get_plots_dir(self) -> Path:
+        """
+        Root PSTH plots directory under the global plots_dir.
+        """
+        return Path(self.config.plots_dir) / "psth"
+
+    def get_psth_plot_date_dir(self) -> Path:
+        """
+        Date-specific subfolder for PSTH plots.
+        Example: <plots_dir>/psth/<YYYY-MM-DD>/
+        """
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        return self.get_plots_dir() / date_str
+
+
+####################################
+## Crosscorrelation related paths ##
+####################################
 
 class CrossCorrPaths:
     """

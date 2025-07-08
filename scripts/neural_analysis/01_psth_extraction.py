@@ -8,18 +8,15 @@ Description:
     using gaze and spike data. Fixations are labeled as interactive or not using mutual fixation density.
     The script computes:
       - Per-fixation PSTHs for each unit
-      - Mean PSTH per unit and fixation category
-      - Mean PSTH per unit, fixation category, and interactivity status
-    All resulting DataFrames are saved to disk.
+      - Mean PSTH per unit: face vs. object
+      - Mean PSTH per unit: interactive vs. non-interactive face fixations
+    All resulting DataFrames are saved automatically.
 
 Run:
     python scripts/analysis/01_psth_extraction.py
-
 """
 
 import logging
-
-import pdb
 
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
@@ -41,7 +38,7 @@ def main():
     logger.info("Initializing config objects...")
     base_config = BaseConfig()
     fixation_config = FixationConfig()
-    neural_config = PSTHConfig()
+    psth_config = PSTHConfig()
     interactivity_config = InteractivityConfig()
 
     logger.info("Initializing data managers...")
@@ -54,7 +51,7 @@ def main():
 
     logger.info("Creating PSTH extractor...")
     extractor = PSTHExtractor(
-        config=neural_config,
+        config=psth_config,
         gaze_data=gaze_data,
         spike_data=spike_data,
         fixation_detector=fixation_detector,
@@ -63,28 +60,25 @@ def main():
 
     try:
         logger.info("Starting per-fixation PSTH extraction...")
-        extractor.compute_psth_per_trial(overwrite=False)
+        extractor.compute_psth_per_trial()
 
-        logger.info("Computing mean PSTH per category...")
-        extractor.compute_avg_psth_per_category()
+        logger.info("Computing mean PSTH: face vs. object...")
+        extractor.compute_avg_face_obj()
 
-        logger.info("Computing mean PSTH per category and interactivity...")
-        extractor.compute_avg_psth_per_category_and_interactivity()
+        logger.info("Computing mean PSTH: interactive vs. non-interactive face...")
+        extractor.compute_avg_int_non_int_face()
 
-        logger.info("Saving all PSTH dataframes to disk...")
-        extractor.save_dataframes()
+        logger.info("PSTH extraction pipeline completed successfully.")
 
-        logger.info("PSTH extraction and save completed successfully.")
-        
         # Display heads of the resulting dataframes
         print("\n--- Head of psth_per_trial ---")
         print(extractor.psth_per_trial.head())
-        
-        print("\n--- Head of avg_psth_per_category ---")
-        print(extractor.avg_psth_per_category.head())
-        
-        print("\n--- Head of avg_psth_per_category_and_interactivity ---")
-        print(extractor.avg_psth_per_category_and_interactivity.head())
+
+        print("\n--- Head of avg_face_obj ---")
+        print(extractor.avg_face_obj.head())
+
+        print("\n--- Head of avg_int_non_int_face ---")
+        print(extractor.avg_int_non_int_face.head())
 
     except Exception as e:
         logger.exception(f"PSTH extraction failed: {e}")
