@@ -79,7 +79,8 @@ class PSTHExtractor:
     def compute_avg_face_obj(self):
         """Always compute and save avg_face_obj"""
         if self.psth_per_trial is None:
-            raise RuntimeError("PSTH per trial must be available. Fetch it first.")
+            logger.info("PSTH per trial not found in memory — fetching it first...")
+            self.fetch_psth("trial_wise")
 
         logger.info("Computing average PSTH: face vs object...")
 
@@ -108,25 +109,29 @@ class PSTHExtractor:
 
 
     def compute_avg_int_non_int_face(self):
-        """Always compute and save avg_int_non_int_face"""
+        """Always compute and save avg_int_non_int_face with category = face_interactive / face_non_interactive"""
         if self.psth_per_trial is None:
-            raise RuntimeError("PSTH per trial must be available. Fetch it first.")
+            logger.info("PSTH per trial not found in memory — fetching it first...")
+            self.fetch_psth("trial_wise")
 
-        logger.info("Computing average PSTH: interactive vs non-interactive face...")
+        logger.info("Computing average PSTH: face_interactive vs face_non_interactive...")
 
         df = self.psth_per_trial.copy()
         df = df[df["category"] == "face"]
 
+        df["adjusted_category"] = df["is_interactive"].map(
+            lambda val: "face_interactive" if val == "interactive" else "face_non_interactive"
+        )
+
         rows = []
-        grouped = df.groupby(["unit_uuid", "is_interactive"])
-        for (unit_uuid, is_interactive), group in grouped:
+        grouped = df.groupby(["unit_uuid", "adjusted_category"])
+        for (unit_uuid, adjusted_category), group in grouped:
             psth_array = np.stack(group["firing_rate"].apply(np.array))
             mean_psth = psth_array.mean(axis=0)
             row = group.iloc[0].to_dict()
             rows.append({
                 "unit_uuid": unit_uuid,
-                "category": "face",
-                "is_interactive": is_interactive,
+                "category": adjusted_category,
                 "avg_firing_rate": mean_psth.tolist(),
                 "region": row.get("region"),
                 "channel": row.get("channel"),
