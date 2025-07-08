@@ -601,6 +601,44 @@ class PSTHPaths:
         return self.get_plots_dir() / date_str
 
 
+#######################
+## PCA related paths ##
+#######################
+
+
+class PCAPaths:
+    """
+    Centralized path manager for PCA plots.
+    """
+
+    def __init__(self, config):
+        self.config = config
+        self.today = datetime.now().strftime("%Y-%m-%d")
+
+    def get_base_dir(self) -> Path:
+        """
+        Root PCA plots directory.
+        """
+        return Path(self.config.plots_dir) / "pca"
+
+    def get_trajectories_dir(self) -> Path:
+        """
+        Date-stamped subfolder for PCA trajectories.
+        """
+        path = self.get_base_dir() / "trajectories" / self.today
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def get_evr_bars_dir(self) -> Path:
+        """
+        Date-stamped subfolder for PCA explained variance bar plots.
+        """
+        path = self.get_base_dir() / "evr_bars" / self.today
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+
+
 ####################################
 ## Crosscorrelation related paths ##
 ####################################
