@@ -30,9 +30,10 @@ class PSTHExtractor:
         self.avg_face_obj: Optional[pd.DataFrame] = None
         self.avg_int_non_int_face: Optional[pd.DataFrame] = None
 
-    # ------------------------
+
+    # ----------------------------
     # == Public compute methods ==
-    # ------------------------
+    # ----------------------------
 
     def compute_psth_per_trial(self):
         """Always compute and save PSTH per trial"""
@@ -63,17 +64,20 @@ class PSTHExtractor:
         ]
 
         if self.config.use_parallel:
+            logger.info(f"Running PSTH extraction in parallel using {self.config.num_cpus} CPU(s)...")
             with tqdm_joblib(tqdm(total=len(tasks), desc="PSTH extraction")):
                 results = Parallel(n_jobs=self.config.num_cpus)(
                     delayed(_process_session_for_psth)(*args) for args in tasks
                 )
         else:
-            results = [_process_session_for_psth(*args) for args in tqdm(tasks)]
+            logger.info("Running PSTH extraction in serial mode...")
+            results = [_process_session_for_psth(*args) for args in tqdm(tasks, desc="PSTH extraction")]
 
         rows = [r for result in results for r in result]
         self.psth_per_trial = pd.DataFrame(rows)
         save_df_to_pkl(self.psth_per_trial, self.config.psth_per_trial_path)
         logger.info(f"Saved PSTH per trial to {self.config.psth_per_trial_path}")
+
 
 
     def compute_avg_face_obj(self):

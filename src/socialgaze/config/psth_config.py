@@ -16,7 +16,7 @@ class PSTHConfig(BaseConfig):
         super().__init__(config_path)
 
         # === PSTH extraction parameters ===
-        self.use_parallel = True
+        self.use_parallel = False
         self.do_smoothing = True
         self.smoothing_bin_sigma = 2  # Smoothing sigma in number of bins
         self.psth_bin_size = 0.01     # Bin size in seconds

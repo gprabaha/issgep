@@ -8,6 +8,7 @@ Preprocesses all raw behavioral data by:
 4. Saving the cleaned DataFrames to .pkl files for downstream analysis.
 """
 
+import pdb
 import logging
 from socialgaze.config.base_config import BaseConfig
 from socialgaze.data.gaze_data import GazeData
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     config = BaseConfig()
     gaze_data = GazeData(config)
+
+    # pdb.set_trace()
 
     logger.info("Step 1: Loading raw .mat data...")
     gaze_data.load_raw_data_from_mat_files()
