@@ -1,5 +1,6 @@
 # src/socialgaze/features/pc_projector.py
 
+import pdb
 import numpy as np
 import pandas as pd
 import logging
@@ -53,7 +54,9 @@ class PCProjector:
         evr_X2_on_X1 = self._explained_var_on_data(pca2, X1)
 
         X_comb = np.concatenate([X1, X2], axis=0)
+        # pdb.set_trace()
         pca_comb = PCA(n_components=n_components).fit(X_comb)
+        evr_comb_X1_X2 = self._explained_var_on_data(pca_comb, X_comb) # pca_comb.explained_variance_ratio_
         evr_comb_X1 = self._explained_var_on_data(pca_comb, X1)
         evr_comb_X2 = self._explained_var_on_data(pca_comb, X2)
 
@@ -66,7 +69,8 @@ class PCProjector:
 
         self._plot_evr_bar(
             region, evr_X1_on_X1, evr_X1_on_X2, evr_X2_on_X2, evr_X2_on_X1,
-            evr_comb_X1, evr_comb_X2, label1, label2, comparison
+            evr_comb_X1_X2, evr_comb_X1, evr_comb_X2,
+            label1, label2, comparison
         )
 
         proj_X1 = pca_comb.transform(X1)
@@ -75,14 +79,17 @@ class PCProjector:
 
 
     def _explained_var_on_data(self, pca: PCA, X: np.ndarray) -> np.ndarray:
-        total_var = np.sum(np.var(X, axis=0))
+        X_centered = X - pca.mean_
+        total_var = np.sum(np.var(X_centered, axis=0))
         X_proj = pca.transform(X)
         var_proj = np.var(X_proj, axis=0)
         return var_proj / total_var
 
 
+
     def _plot_evr_bar(
-        self, region, evr_X1_X1, evr_X1_X2, evr_X2_X2, evr_X2_X1, evr_comb_X1, evr_comb_X2,
+        self, region, evr_X1_X1, evr_X1_X2, evr_X2_X2, evr_X2_X1,
+        evr_comb_X1_X2, evr_comb_X1, evr_comb_X2,
         label1, label2, comparison
     ):
         pcs = np.arange(1, len(evr_X1_X1) + 1)
@@ -101,8 +108,8 @@ class PCProjector:
 
         # Subplot 2: Fit label2
         df2 = pd.DataFrame({
-            f"{label2} EVR": evr_X2_X2,
-            f"{label1} EVR": evr_X2_X1
+            f"{label1} EVR": evr_X2_X1,
+            f"{label2} EVR": evr_X2_X2
         }, index=pcs)
         df2.plot(kind="bar", ax=axs[1])
         axs[1].set_title(f"Fit {label2}")
@@ -111,7 +118,8 @@ class PCProjector:
         # Subplot 3: Fit both
         df3 = pd.DataFrame({
             f"{label1} EVR": evr_comb_X1,
-            f"{label2} EVR": evr_comb_X2
+            f"{label2} EVR": evr_comb_X2,
+            f"{label1}+{label2} EVR": evr_comb_X1_X2
         }, index=pcs)
         df3.plot(kind="bar", ax=axs[2])
         axs[2].set_title("Fit Both")

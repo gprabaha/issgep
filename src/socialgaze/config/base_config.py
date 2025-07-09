@@ -90,6 +90,9 @@ class BaseConfig:
 
         # Get days/sessions with ephys data and the corresponding monkeys
         self.ephys_days_and_monkeys_df = load_df_from_pkl(self.ephys_days_and_monkeys_df_path)
+        self.monkey_dominance_df = None
+        self.create_monkey_dominance_df()
+
 
         self.num_cpus = get_num_available_cpus(self.is_cluster)
 
@@ -191,6 +194,34 @@ class BaseConfig:
         session_df.to_pickle(self.processed_data_dir / "discovered_sessions_and_runs.pkl")
 
 
+    def create_monkey_dominance_df(self):
+        data = {
+            'Monkey Pair': [
+                'Kuro vs Ephron',
+                'Kuro vs Lynch',
+                'Kuro vs Hitchcock',
+                'Lynch vs Cronenberg',
+                'Lynch vs Ephron',
+                'Lynch vs Hitchcock'
+            ],
+            'Olga': ['Kuro', 'Kuro', 'Hitch', 'Cronenberg', 'Lynch', 'Hitch'],
+            'Siqi': ['Kuro', 'Kuro', 'Hitch', 'Cronenberg', 'Lynch', 'Hitch'],
+            'Amrita': ['Kuro', 'Lynch', 'Hitch', 'Lynch', 'Lynch', 'Lynch']
+        }
+
+        df = pd.DataFrame(data)
+        df[['m1', 'm2']] = df['Monkey Pair'].str.split(' vs ', expand=True)
+
+        df['dominant_name'] = df.apply(_get_majority_dominant, axis=1)
+        df['dominant_agent_label'] = df.apply(_get_agent_label, axis=1)
+
+        df = df[['Monkey Pair', 'm1', 'm2', 'Olga', 'Siqi', 'Amrita',
+                 'dominant_name', 'dominant_agent']]
+
+        self.monkey_dominance_df = df
+        df.to_pickle(self.processed_data_dir / "dominant_monkey_consensus.pkl")
+
+
     def extract_sessions_with_ephys_data(self, ephys_days_and_monkeys_df: pd.DataFrame) -> None:
         """
         Filters session/run list to only include those with matching ephys data.
@@ -234,4 +265,25 @@ class BaseConfig:
         config_data = load_config_from_json(config_path)
         assign_dict_attributes_to_object(self, config_data)
 
+####################
+# Helper functions #
+####################
 
+def _get_majority_dominant(row):
+    """Returns the monkey with 2/3 agreement, or None if no agreement."""
+    votes = [row['Olga'], row['Siqi'], row['Amrita']]
+    for monkey in set(votes):
+        if votes.count(monkey) >= 2:
+            return monkey
+    return None
+
+def _get_agent_label(row):
+    """Returns 'm1' if dominant is m1, 'm2' if dominant is m2, else None."""
+    if pd.isna(row['dominant_name']):
+        return None
+    elif row['dominant_name'] == row['m1']:
+        return 'm1'
+    elif row['dominant_name'] == row['m2']:
+        return 'm2'
+    else:
+        return None
