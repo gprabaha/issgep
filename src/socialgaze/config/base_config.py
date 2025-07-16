@@ -1,5 +1,6 @@
 # src/socialgaze/config/base_config.py
 
+import pdb
 import os
 from pathlib import Path
 import logging
@@ -204,9 +205,9 @@ class BaseConfig:
                 'Lynch vs Ephron',
                 'Lynch vs Hitchcock'
             ],
-            'Olga': ['Kuro', 'Kuro', 'Hitch', 'Cronenberg', 'Lynch', 'Hitch'],
-            'Siqi': ['Kuro', 'Kuro', 'Hitch', 'Cronenberg', 'Lynch', 'Hitch'],
-            'Amrita': ['Kuro', 'Lynch', 'Hitch', 'Lynch', 'Lynch', 'Lynch']
+            'Olga': ['Kuro', 'Kuro', 'Hitchcock', 'Cronenberg', 'Lynch', 'Hitchcock'],
+            'Siqi': ['Kuro', 'Kuro', 'Hitchcock', 'Cronenberg', 'Lynch', 'Hitchcock'],
+            'Amrita': ['Kuro', 'Lynch', 'Hitchcock', 'Lynch', 'Lynch', 'Lynch']
         }
 
         df = pd.DataFrame(data)
@@ -216,7 +217,7 @@ class BaseConfig:
         df['dominant_agent_label'] = df.apply(_get_agent_label, axis=1)
 
         df = df[['Monkey Pair', 'm1', 'm2', 'Olga', 'Siqi', 'Amrita',
-                 'dominant_name', 'dominant_agent']]
+                 'dominant_name', 'dominant_agent_label']]
 
         self.monkey_dominance_df = df
         df.to_pickle(self.processed_data_dir / "dominant_monkey_consensus.pkl")
@@ -281,9 +282,9 @@ def _get_agent_label(row):
     """Returns 'm1' if dominant is m1, 'm2' if dominant is m2, else None."""
     if pd.isna(row['dominant_name']):
         return None
-    elif row['dominant_name'] == row['m1']:
+    elif row['dominant_name'] in row['m1']:
         return 'm1'
-    elif row['dominant_name'] == row['m2']:
+    elif row['dominant_name'] in row['m2']:
         return 'm2'
     else:
         return None

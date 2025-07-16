@@ -20,7 +20,7 @@ if __name__ == "__main__":
     config = BaseConfig()
     gaze_data = GazeData(config)
 
-    # pdb.set_trace()
+    pdb.set_trace()
 
     logger.info("Step 1: Loading raw .mat data...")
     gaze_data.load_raw_data_from_mat_files()

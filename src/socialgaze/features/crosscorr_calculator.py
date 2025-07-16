@@ -443,6 +443,8 @@ class CrossCorrCalculator:
         plot_dir = self.config.paths.get_crosscorr_deltas_plot_dir()
         plot_dir.mkdir(parents=True, exist_ok=True)
 
+        pdb.set_trace()
+
         for monkey_pair, res_list in grouped.items():
             comparisons = sorted(set(r["comparison"] for r in res_list))
             periods = sorted(set(r["period_type"] for r in res_list))
