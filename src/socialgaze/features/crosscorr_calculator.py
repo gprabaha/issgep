@@ -420,7 +420,7 @@ class CrossCorrCalculator:
         print(f"Saved delta crosscorr results to {out_path}")
 
 
-    def plot_crosscorr_deltas_combined(self, results_df: pd.DataFrame = None, alpha: float = 0.05):
+    def plot_crosscorr_deltas_combined(self, results_df: pd.DataFrame = None, alpha: float = 0.05, by_dominance: bool = True):
         """
         For each monkey pair:
             - Grid: rows = period_type, columns = face_vs_face vs other comparisons.
@@ -428,6 +428,7 @@ class CrossCorrCalculator:
             - Significant parts plotted bold.
             - x-axis in seconds, ±15s.
             - Shared Y within rows only.
+            - If by_dominance is True, both directions are plotted on the same axis but adjusted for directionality.
 
         Saves to: self.config.paths.get_crosscorr_deltas_plot_dir()
         """
@@ -435,17 +436,22 @@ class CrossCorrCalculator:
             results_path = self.paths.get_analysis_output_path()
             results_df = load_df_from_pkl(results_path)
 
+        dominance_df = self.config.monkey_dominance_df.copy()
+        dominance_lookup = {
+            f"{row['Monkey Pair']}": row["dominant_agent_label"]
+            for _, row in dominance_df.iterrows()
+        }
+
+        from collections import defaultdict
         grouped = defaultdict(list)
         for _, row in results_df.iterrows():
-            pair_key = f"{row['monkey_pair'][0]}-{row['monkey_pair'][1]}"
+            pair_key = f"{row['monkey_pair'][0]} vs {row['monkey_pair'][1]}"
             grouped[pair_key].append(row)
 
         plot_dir = self.config.paths.get_crosscorr_deltas_plot_dir()
         plot_dir.mkdir(parents=True, exist_ok=True)
 
-        pdb.set_trace()
-
-        for monkey_pair, res_list in grouped.items():
+        for monkey_pair_str, res_list in grouped.items():
             comparisons = sorted(set(r["comparison"] for r in res_list))
             periods = sorted(set(r["period_type"] for r in res_list))
 
@@ -459,6 +465,8 @@ class CrossCorrCalculator:
                 squeeze=False
             )
 
+            dom_agent = dominance_lookup.get(monkey_pair_str, None)
+
             for i, period_type in enumerate(periods):
                 ax_face = axes[i][0]
                 ax_other = axes[i][1]
@@ -470,48 +478,56 @@ class CrossCorrCalculator:
                     comp = r["comparison"]
                     color = comp_color_map[comp]
                     label = comp.replace("__vs__", " vs ")
+                    ax = self._choose_axis_from_comparison(comp, ax_face, ax_other)
+
+                    a1, b1, a2, b2 = self._parse_agents_and_behaviors(comp)
+                    if a1 is None:
+                        continue
 
                     lags_sec, mean_delta, p_values, sig_mask = self._prepare_lags_and_delta_for_plotting(r, alpha)
 
-                    # Determine where to plot
-                    if (
-                        ("m1_face_fixation" in comp and "m2_face_fixation" in comp)
-                    ):
-                        ax = ax_face
-                    else:
-                        ax = ax_other
+                    if not by_dominance or dom_agent not in {a1, a2}:
+                        self._plot_crosscorr_result_on_ax(ax, lags_sec, mean_delta, p_values, sig_mask, color, label)
+                        continue
 
-                    self._plot_crosscorr_result_on_ax(ax, lags_sec, mean_delta, p_values, sig_mask, color, label)
-
-                # --- Axis lines ---
-                for ax in [ax_face, ax_other]:
-                    ax.axhline(0, linestyle="-", color="black", linewidth=0.9)
-                    ax.axvline(0, linestyle="-", color="black", linewidth=0.9)
+                    dom2rec, rec2dom = self._split_lags_by_dominance(
+                        lags_sec, mean_delta, p_values, sig_mask, dom_agent, a1, a2
+                    )
+                    if dom2rec is None:
+                        continue
+                    
+                    self._plot_crosscorr_result_on_ax(
+                        ax, *dom2rec, color=color, label=label + " (dom➜rec)", linestyle="-"
+                    )
+                    self._plot_crosscorr_result_on_ax(
+                        ax, *rec2dom, color=color, label=label + " (rec➜dom)", linestyle="--"
+                    )
 
                 ax_face.set_title(f"{period_type.capitalize()} | m1_face vs m2_face", fontsize=11)
                 ax_other.set_title(f"{period_type.capitalize()} | Other comparisons", fontsize=11)
 
                 ax_face.set_xlabel("Lag (s)")
                 ax_other.set_xlabel("Lag (s)")
-
                 ax_face.set_ylabel("Δ Crosscorr")
 
                 if i == 0:
                     ax_face.legend(fontsize=7, loc='upper right', frameon=True)
                     ax_other.legend(fontsize=7, loc='upper right', frameon=True)
 
-                for ax in [ax_face, ax_other]:
-                    ax.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
+                for ax_ in [ax_face, ax_other]:
+                    ax_.axhline(0, linestyle="-", color="black", linewidth=0.9)
+                    ax_.axvline(0, linestyle="-", color="black", linewidth=0.9)
+                    ax_.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
 
-            plt.suptitle(f"Δ Crosscorr | Monkey Pair: {monkey_pair}", fontsize=14)
+            plt.suptitle(f"Δ Crosscorr | {monkey_pair_str}", fontsize=14)
             plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-            fname = f"{monkey_pair.replace('-', '_')}_crosscorr_deltas_combined_grid.png"
+            suffix = "_by_dominance" if by_dominance else ""
+            fname = f"{monkey_pair_str.replace(' ', '_').replace('-', '_')}_crosscorr_deltas_combined_grid{suffix}.png"
             plt.savefig(plot_dir / fname, dpi=200)
             plt.close()
 
         logger.info(f"All Δ crosscorr grid plots saved to: {plot_dir}")
-
 
 
     def _prepare_lags_and_delta_for_plotting(self, r, alpha):
@@ -528,17 +544,78 @@ class CrossCorrCalculator:
 
         return lags_sec, mean_delta, p_values, sig_mask
 
+    def _parse_agents_and_behaviors(self, comparison_str):
+        try:
+            a1, b1 = comparison_str.split("__vs__")[0].split("_", 1)
+            a2, b2 = comparison_str.split("__vs__")[1].split("_", 1)
+            return a1, b1, a2, b2
+        except ValueError:
+            logger.warning(f"Could not parse comparison string: {comparison_str}")
+            return None, None, None, None
 
-    def _plot_crosscorr_result_on_ax(self, ax, lags_sec, mean_delta, p_values, sig_mask, color, label):
+    def _split_lags_by_dominance(self, lags_sec, mean_delta, p_values, sig_mask, dom_agent, a1, a2):
+        if dom_agent == a1:
+            dom2rec_mask = lags_sec >= 0
+            rec2dom_mask = lags_sec <= 0
+
+            dom2rec = (
+                lags_sec[dom2rec_mask],
+                mean_delta[dom2rec_mask],
+                p_values[dom2rec_mask],
+                sig_mask[dom2rec_mask]
+            )
+            rec2dom = (
+                -lags_sec[rec2dom_mask][::-1],
+                mean_delta[rec2dom_mask][::-1],
+                p_values[rec2dom_mask][::-1],
+                sig_mask[rec2dom_mask][::-1]
+            )
+
+        elif dom_agent == a2:
+            dom2rec_mask = lags_sec <= 0
+            rec2dom_mask = lags_sec >= 0
+
+            dom2rec = (
+                -lags_sec[dom2rec_mask][::-1],
+                mean_delta[dom2rec_mask][::-1],
+                p_values[dom2rec_mask][::-1],
+                sig_mask[dom2rec_mask][::-1]
+            )
+            rec2dom = (
+                lags_sec[rec2dom_mask],
+                mean_delta[rec2dom_mask],
+                p_values[rec2dom_mask],
+                sig_mask[rec2dom_mask]
+            )
+
+        else:
+            return None, None
+
+        return dom2rec, rec2dom
+
+    def _choose_axis_from_comparison(self, comparison_str, ax_face, ax_other):
+        if "m1_face_fixation" in comparison_str and "m2_face_fixation" in comparison_str:
+            return ax_face
+        return ax_other
+
+
+    def _plot_crosscorr_result_on_ax(self, ax, lags_sec, mean_delta, p_values, sig_mask, color, label, linestyle="-"):
         # Plot base line (all points, faded)
-        ax.plot(lags_sec, mean_delta, label=label, color=color, linewidth=1.2, alpha=0.5)
+        ax.plot(lags_sec, mean_delta, label=label, color=color, linewidth=1.2, linestyle=linestyle, alpha=0.5)
 
         # Overlay bold segments where significant
         if np.any(sig_mask):
             sig_indices = np.where(sig_mask)[0]
             chunks = np.split(sig_indices, np.where(np.diff(sig_indices) > 1)[0] + 1)
             for chunk in chunks:
-                ax.plot(lags_sec[chunk], mean_delta[chunk], color=color, linewidth=2.5, alpha=1.0)
+                ax.plot(
+                    lags_sec[chunk],
+                    mean_delta[chunk],
+                    color=color,
+                    linewidth=2.5,
+                    linestyle=linestyle,
+                    alpha=1.0
+                )
 
 
 # ------------------------
