@@ -60,13 +60,6 @@ class PCProjector:
         evr_comb_X1 = self._explained_var_on_data(pca_comb, X1)
         evr_comb_X2 = self._explained_var_on_data(pca_comb, X2)
 
-        # logger.info(f"[{region}] Fit {label1} → EVR on {label1}: {evr_X1_on_X1}")
-        # logger.info(f"[{region}] Fit {label1} → EVR on {label2}: {evr_X1_on_X2}")
-        # logger.info(f"[{region}] Fit {label2} → EVR on {label2}: {evr_X2_on_X2}")
-        # logger.info(f"[{region}] Fit {label2} → EVR on {label1}: {evr_X2_on_X1}")
-        # logger.info(f"[{region}] Fit combined → EVR on {label1}: {evr_comb_X1}")
-        # logger.info(f"[{region}] Fit combined → EVR on {label2}: {evr_comb_X2}")
-
         self._plot_evr_bar(
             region, evr_X1_on_X1, evr_X1_on_X2, evr_X2_on_X2, evr_X2_on_X1,
             evr_comb_X1_X2, evr_comb_X1, evr_comb_X2,
