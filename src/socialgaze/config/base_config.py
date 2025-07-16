@@ -94,7 +94,6 @@ class BaseConfig:
         self.monkey_dominance_df = None
         self.create_monkey_dominance_df()
 
-
         self.num_cpus = get_num_available_cpus(self.is_cluster)
 
         self.behav_data_types = ['positions', 'roi_vertices', 'pupil', 'neural_timeline']
