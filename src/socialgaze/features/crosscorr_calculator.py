@@ -322,20 +322,21 @@ class CrossCorrCalculator:
             f"{row['Monkey Pair']}": row["dominant_agent_label"]
             for _, row in self.config.monkey_dominance_df.iterrows()
         }
+        
 
         expanded_rows = []
         for a1, b1, a2, b2 in self.config.crosscorr_agent_behavior_pairs:
             for period_type in ["full", "interactive", "non_interactive"]:
                 expanded_rows.extend(
-                    _process_crosscorr_pair(
-                        self, a1, b1, a2, b2, period_type, session_to_monkey_pair, dominance_lookup
+                    self._process_crosscorr_pair(
+                        a1, b1, a2, b2, period_type, session_to_monkey_pair, dominance_lookup
                     )
                 )
-
+        
         df = pd.DataFrame(expanded_rows)
         df = _assign_leaders_by_crosscorr(df)
         df = _assign_dominance_direction(df)
-
+        
         strategies_to_run = VALID_STRATEGIES if analysis_strategy is None else [analysis_strategy]
         for strategy in strategies_to_run:
             result_df = _aggregate_and_test(df, strategy)
@@ -392,7 +393,7 @@ class CrossCorrCalculator:
 
             rows.append({
                 "session": session, "run": run, "monkey_pair": monkey_pair, "period_type": period_type,
-                "a1": a2, "b1": b2, "a2": a1, "b2": b1, "m1": m1, "m2": m2,
+                "a1": a1, "b1": b1, "a2": a2, "b2": b2, "m1": m1, "m2": m2,
                 "effective_direction": f"{a2}_{b2} → {a1}_{b1}",
                 "lag_direction": "negative_lags_flipped", "lags": -lags[neg_mask][::-1], "delta": delta[neg_mask][::-1],
                 "monkey_dominant": dominant
@@ -906,29 +907,44 @@ def _construct_shuffled_vector(segments: List[Tuple[int, int]], run_length: int)
     return vec
 
 
-## Data analysis helpers
-
+# ---------------------
+# Data analysis helpers
+# ---------------------
 
 def _assign_leaders_by_crosscorr(df):
     df["avg_delta"] = df["delta"].apply(np.mean)
-    leader_labels = []
-    for _, row in df.iterrows():
-        pair_mask = (
-            (df["monkey_pair"] == row["monkey_pair"]) &
-            (df["period_type"] == row["period_type"]) &
-            (df["a1"] == row["a1"]) & (df["b1"] == row["b1"]) &
-            (df["a2"] == row["a2"]) & (df["b2"] == row["b2"])
+
+    # Prepare a new column for assignment
+    df["leader_based_direction"] = "unknown"
+
+    # Get unique group keys
+    group_keys = df.groupby(["monkey_pair", "period_type", "a1", "b1", "a2", "b2"]).groups.keys()
+
+    for key in group_keys:
+        monkey_pair, period_type, a1, b1, a2, b2 = key
+        mask = (
+            (df["monkey_pair"] == monkey_pair) &
+            (df["period_type"] == period_type) &
+            (df["a1"] == a1) & (df["b1"] == b1) &
+            (df["a2"] == a2) & (df["b2"] == b2)
         )
-        pos = df[pair_mask & (df["lag_direction"] == "positive_lags")]["avg_delta"].mean()
-        neg = df[pair_mask & (df["lag_direction"] == "negative_lags_flipped")]["avg_delta"].mean()
-        if pd.isna(pos) or pd.isna(neg):
-            leader_labels.append("unknown")
-        elif row["lag_direction"] == "positive_lags":
-            leader_labels.append("leader_to_follower" if pos > neg else "follower_to_leader")
+
+        df_subset = df[mask]
+        pos_mean = df_subset[df_subset["lag_direction"] == "positive_lags"]["avg_delta"].mean()
+        neg_mean = df_subset[df_subset["lag_direction"] == "negative_lags_flipped"]["avg_delta"].mean()
+
+        if pd.isna(pos_mean) or pd.isna(neg_mean):
+            label_pos, label_neg = "unknown", "unknown"
+        elif pos_mean > neg_mean:
+            label_pos, label_neg = "leader_to_follower", "follower_to_leader"
         else:
-            leader_labels.append("follower_to_leader" if pos > neg else "leader_to_follower")
-    df["leader_based_direction"] = leader_labels
+            label_pos, label_neg = "follower_to_leader", "leader_to_follower"
+
+        df.loc[mask & (df["lag_direction"] == "positive_lags"), "leader_based_direction"] = label_pos
+        df.loc[mask & (df["lag_direction"] == "negative_lags_flipped"), "leader_based_direction"] = label_neg
+
     return df
+
 
 def _assign_dominance_direction(df):
     labels = []
@@ -942,6 +958,7 @@ def _assign_dominance_direction(df):
             labels.append("dominant_to_recessive" if row["a2"] == dom else "recessive_to_dominant")
     df["dominance_based_direction"] = labels
     return df
+
 
 def _aggregate_and_test(df, strategy):
     if strategy == "default":
@@ -957,29 +974,66 @@ def _aggregate_and_test(df, strategy):
         raise ValueError(f"Invalid strategy: {strategy}")
 
     result_rows = []
-    grouped = filter_df.groupby(["monkey_pair", "period_type", grouping_col])
+
+    # Per-monkey-pair aggregation
+    grouped = filter_df.groupby(["monkey_pair", "period_type", grouping_col, "a1", "b1", "a2", "b2"])
     for key, group in grouped:
+        monkey_pair, period_type, direction_label, a1, b1, a2, b2 = key
         lags = group.iloc[0]["lags"]
         deltas = np.vstack(group["delta"].to_numpy())
         mean_delta = deltas.mean(axis=0)
-        p_vals = [ttest_1samp(deltas[:, i], 0, alternative="greater").pvalue for i in range(len(lags))]
+        _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
+
+        rep = group.iloc[0]
+
         result_rows.append({
-            "monkey_pair": key[0], "period_type": key[1], "direction_label": key[2],
-            "lags": lags, "mean_delta": mean_delta, "p_values": p_vals, "n_runs": len(group)
+            "monkey_pair": monkey_pair,
+            "period_type": period_type,
+            "direction_label": direction_label,
+            "effective_direction": rep["effective_direction"],
+            "lags": lags,
+            "mean_delta": mean_delta,
+            "p_values": p_vals,
+            "n_runs": len(group),
+            "a1": a1,
+            "a2": a2,
+            "b1": b1,
+            "b2": b2,
+            "m1": rep["m1"],
+            "m2": rep["m2"],
+            "monkey_dominant": rep.get("monkey_dominant", None)
         })
 
-    for label in filter_df[grouping_col].unique():
-        for period_type in filter_df["period_type"].unique():
-            group = filter_df.query("period_type == @period_type and @grouping_col == @label")
-            if group.empty:
-                continue
-            lags = group.iloc[0]["lags"]
-            deltas = np.vstack(group["delta"].to_numpy())
-            mean_delta = deltas.mean(axis=0)
-            p_vals = [ttest_1samp(deltas[:, i], 0, alternative="greater").pvalue for i in range(len(lags))]
-            result_rows.append({
-                "monkey_pair": "ALL", "period_type": period_type, "direction_label": label,
-                "lags": lags, "mean_delta": mean_delta, "p_values": p_vals, "n_runs": len(group)
-            })
+    # Global aggregation across all monkey pairs
+    grouped_all = filter_df.groupby([grouping_col, "period_type", "a1", "b1", "a2", "b2"])
+    for key, group in grouped_all:
+        direction_label, period_type, a1, b1, a2, b2 = key
+        if group.empty:
+            continue
+        lags = group.iloc[0]["lags"]
+        deltas = np.vstack(group["delta"].to_numpy())
+        mean_delta = deltas.mean(axis=0)
+        _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
+
+        rep = group.iloc[0]
+
+        result_rows.append({
+            "monkey_pair": "ALL",
+            "period_type": period_type,
+            "direction_label": direction_label,
+            "effective_direction": rep["effective_direction"],
+            "lags": lags,
+            "mean_delta": mean_delta,
+            "p_values": p_vals,
+            "n_runs": len(group),
+            "a1": a1,
+            "a2": a2,
+            "b1": b1,
+            "b2": b2,
+            "m1": rep["m1"],
+            "m2": rep["m2"],
+            "monkey_dominant": rep.get("monkey_dominant", None)
+        })
 
     return pd.DataFrame(result_rows)
+
