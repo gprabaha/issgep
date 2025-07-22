@@ -29,12 +29,12 @@ class CrossCorrConfig(BaseConfig):
         # === Cross-correlation parameters ===
         self.max_lag: int = 30000  # 30 sec at 1 kHz
         self.normalize: bool = True
-        self.use_energy_norm: bool = True
+        self.use_energy_norm: bool = False
 
         # === Shuffle + smoothing ===
         self.num_shuffles: int = 1000
         self.make_shuffle_stringent: bool = True
-        self.do_smoothing: bool = True
+        self.do_smoothing: bool = False
         self.smoothing_sigma_n_bins: int = 2
 
         # === HPC job configuration ===

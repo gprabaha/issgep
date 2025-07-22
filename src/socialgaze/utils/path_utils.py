@@ -770,8 +770,8 @@ class CrossCorrPaths:
 
     # === Final results file ===
 
-    def get_analysis_output_path(self) -> Path:
-        return Path(self.config.output_dir) / "results" / "mean_minus_shuffled_crosscorr_results.pkl"
+    def get_analysis_output_path(self, strategy) -> Path:
+        return Path(self.config.output_dir) / "results" / f"mean_minus_shuffled_crosscorr_results_{strategy}.pkl"
 
 
     def get_crosscorr_deltas_plot_dir(self) -> Path:

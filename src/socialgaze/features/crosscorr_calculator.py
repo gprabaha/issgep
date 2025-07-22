@@ -314,126 +314,110 @@ class CrossCorrCalculator:
                 logger.debug(f"Deleted temp file: {f}")
 
 
-    def analyze_crosscorr_vs_shuffled_per_pair(self):
-        """
-        Compares observed vs shuffled crosscorrelations for each behavior pair and period,
-        grouped by monkey identity pairs from self.config.ephys_days_and_monkeys.
-        Handles lag truncation and saves full results as a DataFrame.
-        """
-        all_rows = []
-        pd.set_option("display.max_columns", None)
-        pd.set_option("display.width", 0)
+    def analyze_crosscorr_vs_shuffled_per_pair(self, analysis_strategy: str = None):
+        VALID_STRATEGIES = ["default", "by_dominance", "by_leader_follower"]
 
         session_to_monkey_pair = self.config.ephys_days_and_monkeys_df.set_index("session_name")[["m1", "m2"]].to_dict("index")
+        dominance_lookup = {
+            f"{row['Monkey Pair']}": row["dominant_agent_label"]
+            for _, row in self.config.monkey_dominance_df.iterrows()
+        }
 
+        expanded_rows = []
         for a1, b1, a2, b2 in self.config.crosscorr_agent_behavior_pairs:
             for period_type in ["full", "interactive", "non_interactive"]:
-                obs_path = self.paths.get_obs_crosscorr_path(a1, b1, a2, b2, period_type)
-                shuffled_path = self.paths.get_shuffled_final_path(a1, b1, a2, b2, period_type)
+                expanded_rows.extend(
+                    _process_crosscorr_pair(
+                        self, a1, b1, a2, b2, period_type, session_to_monkey_pair, dominance_lookup
+                    )
+                )
 
-                if not obs_path.exists() or not shuffled_path.exists():
-                    logger.warning(f"Missing observed or shuffled file for {a1}-{b1} vs {a2}-{b2} [{period_type}]")
-                    continue
+        df = pd.DataFrame(expanded_rows)
+        df = _assign_leaders_by_crosscorr(df)
+        df = _assign_dominance_direction(df)
 
-                try:
-                    observed_df = pd.read_pickle(obs_path)
-                    shuffled_df = pd.read_pickle(shuffled_path)
-                except Exception as e:
-                    logger.warning(f"Error loading data for {a1}-{b1} vs {a2}-{b2} [{period_type}]: {e}")
-                    continue
-
-                obs_groups = observed_df.groupby(["session_name", "run_number"])
-                shuffle_groups = shuffled_df.groupby(["session_name", "run_number"])
-
-                delta_dict = defaultdict(list)
-                lags_dict = {}
-
-                for (session, run), obs_group in obs_groups:
-                    session = str(session)
-                    run = str(run)
-
-                    if session not in session_to_monkey_pair:
-                        logger.warning(f"No monkey ID info for session {session}")
-                        continue
-                    monkey_pair = tuple(session_to_monkey_pair[session].values())
-
-                    try:
-                        shuffle_group = shuffle_groups.get_group((session, run))
-                    except KeyError:
-                        logger.warning(f"No shuffled data for session {session} run {run}")
-                        continue
-
-                    try:
-                        lags = obs_group.iloc[0]["lags"]
-                        obs_corr = obs_group.iloc[0]["crosscorr"]
-                        shuffled_mean = shuffle_group.iloc[0]["crosscorr_mean"]
-
-                        delta = obs_corr - shuffled_mean
-                        delta_dict[monkey_pair].append(delta)
-                        lags_dict[monkey_pair] = lags
-                    except Exception as e:
-                        logger.warning(f"Error computing delta for session {session} run {run}: {e}")
-                        continue
-
-                for monkey_pair, deltas in delta_dict.items():
-                    if not deltas:
-                        continue
-                    min_len = min(len(d) for d in deltas)
-                    if min_len < 2:
-                        logger.warning(f"Too short vectors for {monkey_pair}, skipping")
-                        continue
-
-                    truncated_deltas = np.stack(deltas)
-                    lags = lags_dict[monkey_pair]
-
-                    mean_delta = truncated_deltas.mean(axis=0)
-                    t_stat, p_vals = ttest_1samp(truncated_deltas, popmean=0, axis=0, nan_policy="omit")
-
-                    all_rows.append({
-                        "comparison": self.paths.get_comparison_name(a1, b1, a2, b2),
-                        "period_type": period_type,
-                        "monkey_pair": monkey_pair,
-                        "lags": lags,  # store arrays in list to keep as single cell
-                        "mean_delta": mean_delta,
-                        "t_stat": t_stat,
-                        "p_values": p_vals,
-                        "n_runs": len(deltas)
-                    })
-
-        result_df = pd.DataFrame(all_rows)
-        if not result_df.empty:
-            logger.info(f"Cross-correlation Δ results (first 5 rows):\n{result_df.head()}")
-        else:
-            logger.warning("No cross-correlation Δ results computed.")
-
-        self.save_crosscorr_analysis_results(result_df)
-        return result_df
+        strategies_to_run = VALID_STRATEGIES if analysis_strategy is None else [analysis_strategy]
+        for strategy in strategies_to_run:
+            result_df = _aggregate_and_test(df, strategy)
+            self.save_crosscorr_analysis_results(result_df, strategy=strategy)
 
 
-    def save_crosscorr_analysis_results(self, results):
+    def _process_crosscorr_pair(self, a1, b1, a2, b2, period_type, session_to_monkey_pair, dominance_lookup):
+        obs_path = self.paths.get_obs_crosscorr_path(a1, b1, a2, b2, period_type)
+        shuffled_path = self.paths.get_shuffled_final_path(a1, b1, a2, b2, period_type)
+
+        if not obs_path.exists() or not shuffled_path.exists():
+            logger.warning(f"Missing files for {a1}-{b1} vs {a2}-{b2} [{period_type}]")
+            return []
+
+        try:
+            observed_df = pd.read_pickle(obs_path)
+            shuffled_df = pd.read_pickle(shuffled_path)
+        except Exception as e:
+            logger.warning(f"Failed to load data for {a1}-{b1} vs {a2}-{b2}: {e}")
+            return []
+
+        rows = []
+        for (session, run), obs_group in observed_df.groupby(["session_name", "run_number"]):
+            run = str(run)
+            session = str(session)
+            monkey_ids = session_to_monkey_pair.get(session)
+            if not monkey_ids:
+                continue
+
+            try:
+                shuffle_row = shuffled_df.query("session_name == @session and run_number == @run").iloc[0]
+            except IndexError:
+                continue
+
+            m1, m2 = monkey_ids["m1"], monkey_ids["m2"]
+            monkey_pair = f"{m1} vs {m2}"
+            dominant = dominance_lookup.get(monkey_pair)
+
+            lags = obs_group.iloc[0]["lags"]
+            obs_corr = obs_group.iloc[0]["crosscorr"]
+            shuffled_mean = shuffle_row["crosscorr_mean"]
+            delta = obs_corr - shuffled_mean
+
+            pos_mask = lags >= 0
+            neg_mask = lags <= 0
+
+            rows.append({
+                "session": session, "run": run, "monkey_pair": monkey_pair, "period_type": period_type,
+                "a1": a1, "b1": b1, "a2": a2, "b2": b2, "m1": m1, "m2": m2,
+                "effective_direction": f"{a1}_{b1} → {a2}_{b2}",
+                "lag_direction": "positive_lags", "lags": lags[pos_mask], "delta": delta[pos_mask],
+                "monkey_dominant": dominant
+            })
+
+            rows.append({
+                "session": session, "run": run, "monkey_pair": monkey_pair, "period_type": period_type,
+                "a1": a2, "b1": b2, "a2": a1, "b2": b1, "m1": m1, "m2": m2,
+                "effective_direction": f"{a2}_{b2} → {a1}_{b1}",
+                "lag_direction": "negative_lags_flipped", "lags": -lags[neg_mask][::-1], "delta": delta[neg_mask][::-1],
+                "monkey_dominant": dominant
+            })
+        return rows
+
+
+    def save_crosscorr_analysis_results(self, results: pd.DataFrame, strategy: str):
         """
-        Saves results to: config.output_dir/results/mean_minus_shuffled_crosscorr_results.pkl
+        Saves results to: results/mean_minus_shuffled_crosscorr_results_<strategy>.pkl
         """
-        out_path = self.paths.get_analysis_output_path()
+        out_path = self.paths.get_analysis_output_path(strategy=strategy)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         pd.to_pickle(results, out_path)
         print(f"Saved delta crosscorr results to {out_path}")
 
 
-    def plot_crosscorr_deltas_combined(self, results_df: pd.DataFrame = None, alpha: float = 0.05, by_dominance: bool = True):
-        """
-        For each monkey pair:
-            - Grid: rows = period_type, columns = face_vs_face vs other comparisons.
-            - Each subplot overlays comparisons with unique colors.
-            - Significant parts plotted bold.
-            - x-axis in seconds, ±15s.
-            - Shared Y within rows only.
-            - If by_dominance is True, both directions are plotted on the same axis but adjusted for directionality.
 
-        Saves to: self.config.paths.get_crosscorr_deltas_plot_dir()
-        """
+    def plot_crosscorr_deltas_combined(self, results_df: pd.DataFrame = None, alpha: float = 0.05, plot_strategy: str = "by_leader_follower"):
+        VALID_STRATEGIES = ["default", "by_dominance", "by_leader_follower"]
+        if plot_strategy not in VALID_STRATEGIES:
+            raise ValueError(f"Invalid plot_strategy: {plot_strategy}. Must be one of {VALID_STRATEGIES}")
+
         if results_df is None:
-            results_path = self.paths.get_analysis_output_path()
+            results_path = self.paths.get_analysis_output_path(strategy=plot_strategy)
             results_df = load_df_from_pkl(results_path)
 
         dominance_df = self.config.monkey_dominance_df.copy()
@@ -442,18 +426,19 @@ class CrossCorrCalculator:
             for _, row in dominance_df.iterrows()
         }
 
-        from collections import defaultdict
+        plot_dir = self.config.paths.get_crosscorr_deltas_plot_dir()
+        plot_dir.mkdir(parents=True, exist_ok=True)
+
         grouped = defaultdict(list)
         for _, row in results_df.iterrows():
             pair_key = f"{row['monkey_pair'][0]} vs {row['monkey_pair'][1]}"
             grouped[pair_key].append(row)
 
-        plot_dir = self.config.paths.get_crosscorr_deltas_plot_dir()
-        plot_dir.mkdir(parents=True, exist_ok=True)
-
         for monkey_pair_str, res_list in grouped.items():
             comparisons = sorted(set(r["comparison"] for r in res_list))
             periods = sorted(set(r["period_type"] for r in res_list))
+            m1_name, m2_name = monkey_pair_str.split(" vs ")
+            abbrev = {m1_name: m1_name[0].upper(), m2_name: m2_name[0].upper()}
 
             cmap = cm.get_cmap("rainbow", len(comparisons))
             comp_color_map = {comp: cmap(i) for i, comp in enumerate(comparisons)}
@@ -477,35 +462,51 @@ class CrossCorrCalculator:
 
                     comp = r["comparison"]
                     color = comp_color_map[comp]
-                    label = comp.replace("__vs__", " vs ")
                     ax = self._choose_axis_from_comparison(comp, ax_face, ax_other)
-
                     a1, b1, a2, b2 = self._parse_agents_and_behaviors(comp)
                     if a1 is None:
                         continue
 
                     lags_sec, mean_delta, p_values, sig_mask = self._prepare_lags_and_delta_for_plotting(r, alpha)
+                    flipped = r.get("flipped", False)
 
-                    if not by_dominance or dom_agent not in {a1, a2}:
+                    if plot_strategy == "default":
+                        label = f"{b1} ({a1}) ➜ {b2} ({a2})"
                         self._plot_crosscorr_result_on_ax(ax, lags_sec, mean_delta, p_values, sig_mask, color, label)
-                        continue
 
-                    dom2rec, rec2dom = self._split_lags_by_dominance(
-                        lags_sec, mean_delta, p_values, sig_mask, dom_agent, a1, a2
-                    )
-                    if dom2rec is None:
-                        continue
-                    
-                    self._plot_crosscorr_result_on_ax(
-                        ax, *dom2rec, color=color, label=label + " (dom➜rec)", linestyle="-"
-                    )
-                    self._plot_crosscorr_result_on_ax(
-                        ax, *rec2dom, color=color, label=label + " (rec➜dom)", linestyle="--"
-                    )
+                    elif plot_strategy == "by_dominance" and dom_agent in {a1, a2}:
+                        dom2rec, rec2dom = self._split_lags_by_dominance(lags_sec, mean_delta, p_values, sig_mask, dom_agent, a1, a2, flipped)
+                        if dom2rec is None:
+                            continue
+
+                        dom_full = r['monkey_pair'][0] if dom_agent == "m1" else r['monkey_pair'][1]
+                        rec_agent = a2 if dom_agent == a1 else a1
+                        rec_full = r['monkey_pair'][1] if dom_agent == "m1" else r['monkey_pair'][0]
+                        dom_letter = abbrev[dom_full]
+                        rec_letter = abbrev[rec_full]
+
+                        label1 = f"Dom➜Rec: {b1 if dom_agent == a1 else b2} ({dom_letter}, {dom_agent}) ➜ {b2 if dom_agent == a1 else b1} ({rec_letter}, {rec_agent})"
+                        label2 = f"Rec➜Dom: {b2 if dom_agent == a1 else b1} ({rec_letter}, {rec_agent}) ➜ {b1 if dom_agent == a1 else b2} ({dom_letter}, {dom_agent})"
+
+                        self._plot_crosscorr_result_on_ax(ax, *dom2rec, color=color, label=label1, linestyle="-")
+                        self._plot_crosscorr_result_on_ax(ax, *rec2dom, color=color, label=label2, linestyle="--")
+
+                    elif plot_strategy == "by_leader_follower":
+                        l2f, f2l, leader, follower = self._split_lags_by_leader_follower(lags_sec, mean_delta, p_values, sig_mask, a1, a2, flipped)
+
+                        leader_full = r['monkey_pair'][0] if leader == "m1" else r['monkey_pair'][1]
+                        follower_full = r['monkey_pair'][1] if leader == "m1" else r['monkey_pair'][0]
+                        leader_letter = abbrev[leader_full]
+                        follower_letter = abbrev[follower_full]
+
+                        label1 = f"Leader➜Follower: {b1 if leader == a1 else b2} ({leader_letter}, {leader}) ➜ {b2 if leader == a1 else b1} ({follower_letter}, {follower})"
+                        label2 = f"Follower➜Leader: {b2 if leader == a1 else b1} ({follower_letter}, {follower}) ➜ {b1 if leader == a1 else b2} ({leader_letter}, {leader})"
+
+                        self._plot_crosscorr_result_on_ax(ax, *l2f, color=color, label=label1, linestyle="-")
+                        self._plot_crosscorr_result_on_ax(ax, *f2l, color=color, label=label2, linestyle="--")
 
                 ax_face.set_title(f"{period_type.capitalize()} | m1_face vs m2_face", fontsize=11)
                 ax_other.set_title(f"{period_type.capitalize()} | Other comparisons", fontsize=11)
-
                 ax_face.set_xlabel("Lag (s)")
                 ax_other.set_xlabel("Lag (s)")
                 ax_face.set_ylabel("Δ Crosscorr")
@@ -519,15 +520,16 @@ class CrossCorrCalculator:
                     ax_.axvline(0, linestyle="-", color="black", linewidth=0.9)
                     ax_.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
 
-            plt.suptitle(f"Δ Crosscorr | {monkey_pair_str}", fontsize=14)
+            plt.suptitle(f"Δ Crosscorr | {monkey_pair_str} | strategy={plot_strategy}", fontsize=14)
             plt.tight_layout(rect=[0, 0, 1, 0.96])
-
-            suffix = "_by_dominance" if by_dominance else ""
+            suffix = f"_strategy_{plot_strategy}"
             fname = f"{monkey_pair_str.replace(' ', '_').replace('-', '_')}_crosscorr_deltas_combined_grid{suffix}.png"
             plt.savefig(plot_dir / fname, dpi=200)
             plt.close()
 
         logger.info(f"All Δ crosscorr grid plots saved to: {plot_dir}")
+
+
 
 
     def _prepare_lags_and_delta_for_plotting(self, r, alpha):
@@ -544,6 +546,7 @@ class CrossCorrCalculator:
 
         return lags_sec, mean_delta, p_values, sig_mask
 
+
     def _parse_agents_and_behaviors(self, comparison_str):
         try:
             a1, b1 = comparison_str.split("__vs__")[0].split("_", 1)
@@ -553,45 +556,6 @@ class CrossCorrCalculator:
             logger.warning(f"Could not parse comparison string: {comparison_str}")
             return None, None, None, None
 
-    def _split_lags_by_dominance(self, lags_sec, mean_delta, p_values, sig_mask, dom_agent, a1, a2):
-        if dom_agent == a1:
-            dom2rec_mask = lags_sec >= 0
-            rec2dom_mask = lags_sec <= 0
-
-            dom2rec = (
-                lags_sec[dom2rec_mask],
-                mean_delta[dom2rec_mask],
-                p_values[dom2rec_mask],
-                sig_mask[dom2rec_mask]
-            )
-            rec2dom = (
-                -lags_sec[rec2dom_mask][::-1],
-                mean_delta[rec2dom_mask][::-1],
-                p_values[rec2dom_mask][::-1],
-                sig_mask[rec2dom_mask][::-1]
-            )
-
-        elif dom_agent == a2:
-            dom2rec_mask = lags_sec <= 0
-            rec2dom_mask = lags_sec >= 0
-
-            dom2rec = (
-                -lags_sec[dom2rec_mask][::-1],
-                mean_delta[dom2rec_mask][::-1],
-                p_values[dom2rec_mask][::-1],
-                sig_mask[dom2rec_mask][::-1]
-            )
-            rec2dom = (
-                lags_sec[rec2dom_mask],
-                mean_delta[rec2dom_mask],
-                p_values[rec2dom_mask],
-                sig_mask[rec2dom_mask]
-            )
-
-        else:
-            return None, None
-
-        return dom2rec, rec2dom
 
     def _choose_axis_from_comparison(self, comparison_str, ax_face, ax_other):
         if "m1_face_fixation" in comparison_str and "m2_face_fixation" in comparison_str:
@@ -941,3 +905,81 @@ def _construct_shuffled_vector(segments: List[Tuple[int, int]], run_length: int)
         idx += dur
     return vec
 
+
+## Data analysis helpers
+
+
+def _assign_leaders_by_crosscorr(df):
+    df["avg_delta"] = df["delta"].apply(np.mean)
+    leader_labels = []
+    for _, row in df.iterrows():
+        pair_mask = (
+            (df["monkey_pair"] == row["monkey_pair"]) &
+            (df["period_type"] == row["period_type"]) &
+            (df["a1"] == row["a1"]) & (df["b1"] == row["b1"]) &
+            (df["a2"] == row["a2"]) & (df["b2"] == row["b2"])
+        )
+        pos = df[pair_mask & (df["lag_direction"] == "positive_lags")]["avg_delta"].mean()
+        neg = df[pair_mask & (df["lag_direction"] == "negative_lags_flipped")]["avg_delta"].mean()
+        if pd.isna(pos) or pd.isna(neg):
+            leader_labels.append("unknown")
+        elif row["lag_direction"] == "positive_lags":
+            leader_labels.append("leader_to_follower" if pos > neg else "follower_to_leader")
+        else:
+            leader_labels.append("follower_to_leader" if pos > neg else "leader_to_follower")
+    df["leader_based_direction"] = leader_labels
+    return df
+
+def _assign_dominance_direction(df):
+    labels = []
+    for _, row in df.iterrows():
+        dom = row["monkey_dominant"]
+        if dom is None or pd.isna(dom):
+            labels.append("unknown")
+        elif row["lag_direction"] == "positive_lags":
+            labels.append("dominant_to_recessive" if row["a1"] == dom else "recessive_to_dominant")
+        else:
+            labels.append("dominant_to_recessive" if row["a2"] == dom else "recessive_to_dominant")
+    df["dominance_based_direction"] = labels
+    return df
+
+def _aggregate_and_test(df, strategy):
+    if strategy == "default":
+        grouping_col = "effective_direction"
+        filter_df = df
+    elif strategy == "by_dominance":
+        grouping_col = "dominance_based_direction"
+        filter_df = df[df[grouping_col].isin(["dominant_to_recessive", "recessive_to_dominant"])]
+    elif strategy == "by_leader_follower":
+        grouping_col = "leader_based_direction"
+        filter_df = df[df[grouping_col].isin(["leader_to_follower", "follower_to_leader"])]
+    else:
+        raise ValueError(f"Invalid strategy: {strategy}")
+
+    result_rows = []
+    grouped = filter_df.groupby(["monkey_pair", "period_type", grouping_col])
+    for key, group in grouped:
+        lags = group.iloc[0]["lags"]
+        deltas = np.vstack(group["delta"].to_numpy())
+        mean_delta = deltas.mean(axis=0)
+        p_vals = [ttest_1samp(deltas[:, i], 0, alternative="greater").pvalue for i in range(len(lags))]
+        result_rows.append({
+            "monkey_pair": key[0], "period_type": key[1], "direction_label": key[2],
+            "lags": lags, "mean_delta": mean_delta, "p_values": p_vals, "n_runs": len(group)
+        })
+
+    for label in filter_df[grouping_col].unique():
+        for period_type in filter_df["period_type"].unique():
+            group = filter_df.query("period_type == @period_type and @grouping_col == @label")
+            if group.empty:
+                continue
+            lags = group.iloc[0]["lags"]
+            deltas = np.vstack(group["delta"].to_numpy())
+            mean_delta = deltas.mean(axis=0)
+            p_vals = [ttest_1samp(deltas[:, i], 0, alternative="greater").pvalue for i in range(len(lags))]
+            result_rows.append({
+                "monkey_pair": "ALL", "period_type": period_type, "direction_label": label,
+                "lags": lags, "mean_delta": mean_delta, "p_values": p_vals, "n_runs": len(group)
+            })
+
+    return pd.DataFrame(result_rows)
