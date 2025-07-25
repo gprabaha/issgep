@@ -65,14 +65,9 @@ def main():
         # calculator.compute_shuffled_crosscorrelations(by_interactivity_period=False)
         # calculator.compute_shuffled_crosscorrelations(by_interactivity_period=True)
         
-        calculator.analyze_crosscorr_vs_shuffled_per_pair()
-        # calculator.analyze_crosscorr_vs_shuffled_per_pair(analysis_strategy="by_dominance")
-        # calculator.analyze_crosscorr_vs_shuffled_per_pair(analysis_strategy="by_leader_follower")
+        # calculator.analyze_crosscorr_vs_shuffled_per_pair()
 
-        # calculator.plot_crosscorr_deltas_combined(plot_strategy="default")
-        # calculator.plot_crosscorr_deltas_combined(plot_strategy="by_dominance")
-        # calculator.plot_crosscorr_deltas_combined(plot_strategy="by_leader_follower")
-
+        calculator.plot_crosscorr_deltas()
 
 if __name__ == "__main__":
     main()

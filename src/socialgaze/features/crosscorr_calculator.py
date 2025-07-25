@@ -411,176 +411,18 @@ class CrossCorrCalculator:
         print(f"Saved delta crosscorr results to {out_path}")
 
 
-
-    def plot_crosscorr_deltas_combined(self, results_df: pd.DataFrame = None, alpha: float = 0.05, plot_strategy: str = "by_leader_follower"):
-        VALID_STRATEGIES = ["default", "by_dominance", "by_leader_follower"]
-        if plot_strategy not in VALID_STRATEGIES:
-            raise ValueError(f"Invalid plot_strategy: {plot_strategy}. Must be one of {VALID_STRATEGIES}")
-
-        if results_df is None:
-            results_path = self.paths.get_analysis_output_path(strategy=plot_strategy)
-            results_df = load_df_from_pkl(results_path)
-
-        dominance_df = self.config.monkey_dominance_df.copy()
-        dominance_lookup = {
-            f"{row['Monkey Pair']}": row["dominant_agent_label"]
-            for _, row in dominance_df.iterrows()
-        }
-
+    def plot_crosscorr_deltas(self, alpha=0.05):
         plot_dir = self.config.paths.get_crosscorr_deltas_plot_dir()
-        plot_dir.mkdir(parents=True, exist_ok=True)
+        strategies = ["default", "by_dominance", "by_leader_follower"]
 
-        grouped = defaultdict(list)
-        for _, row in results_df.iterrows():
-            pair_key = f"{row['monkey_pair'][0]} vs {row['monkey_pair'][1]}"
-            grouped[pair_key].append(row)
+        for strategy in strategies:
+            result_path = self.paths.get_analysis_output_path(strategy=strategy)
+            if not result_path.exists():
+                logger.warning(f"Result file not found for strategy: {strategy}")
+                continue
 
-        for monkey_pair_str, res_list in grouped.items():
-            comparisons = sorted(set(r["comparison"] for r in res_list))
-            periods = sorted(set(r["period_type"] for r in res_list))
-            m1_name, m2_name = monkey_pair_str.split(" vs ")
-            abbrev = {m1_name: m1_name[0].upper(), m2_name: m2_name[0].upper()}
-
-            cmap = cm.get_cmap("rainbow", len(comparisons))
-            comp_color_map = {comp: cmap(i) for i, comp in enumerate(comparisons)}
-
-            _, axes = plt.subplots(
-                nrows=len(periods), ncols=2,
-                figsize=(12, 3.5 * len(periods)),
-                sharey='col',
-                squeeze=False
-            )
-
-            dom_agent = dominance_lookup.get(monkey_pair_str, None)
-
-            for i, period_type in enumerate(periods):
-                ax_face = axes[i][0]
-                ax_other = axes[i][1]
-
-                for r in res_list:
-                    if r["period_type"] != period_type:
-                        continue
-
-                    comp = r["comparison"]
-                    color = comp_color_map[comp]
-                    ax = self._choose_axis_from_comparison(comp, ax_face, ax_other)
-                    a1, b1, a2, b2 = self._parse_agents_and_behaviors(comp)
-                    if a1 is None:
-                        continue
-
-                    lags_sec, mean_delta, p_values, sig_mask = self._prepare_lags_and_delta_for_plotting(r, alpha)
-                    flipped = r.get("flipped", False)
-
-                    if plot_strategy == "default":
-                        label = f"{b1} ({a1}) ➜ {b2} ({a2})"
-                        self._plot_crosscorr_result_on_ax(ax, lags_sec, mean_delta, p_values, sig_mask, color, label)
-
-                    elif plot_strategy == "by_dominance" and dom_agent in {a1, a2}:
-                        dom2rec, rec2dom = self._split_lags_by_dominance(lags_sec, mean_delta, p_values, sig_mask, dom_agent, a1, a2, flipped)
-                        if dom2rec is None:
-                            continue
-
-                        dom_full = r['monkey_pair'][0] if dom_agent == "m1" else r['monkey_pair'][1]
-                        rec_agent = a2 if dom_agent == a1 else a1
-                        rec_full = r['monkey_pair'][1] if dom_agent == "m1" else r['monkey_pair'][0]
-                        dom_letter = abbrev[dom_full]
-                        rec_letter = abbrev[rec_full]
-
-                        label1 = f"Dom➜Rec: {b1 if dom_agent == a1 else b2} ({dom_letter}, {dom_agent}) ➜ {b2 if dom_agent == a1 else b1} ({rec_letter}, {rec_agent})"
-                        label2 = f"Rec➜Dom: {b2 if dom_agent == a1 else b1} ({rec_letter}, {rec_agent}) ➜ {b1 if dom_agent == a1 else b2} ({dom_letter}, {dom_agent})"
-
-                        self._plot_crosscorr_result_on_ax(ax, *dom2rec, color=color, label=label1, linestyle="-")
-                        self._plot_crosscorr_result_on_ax(ax, *rec2dom, color=color, label=label2, linestyle="--")
-
-                    elif plot_strategy == "by_leader_follower":
-                        l2f, f2l, leader, follower = self._split_lags_by_leader_follower(lags_sec, mean_delta, p_values, sig_mask, a1, a2, flipped)
-
-                        leader_full = r['monkey_pair'][0] if leader == "m1" else r['monkey_pair'][1]
-                        follower_full = r['monkey_pair'][1] if leader == "m1" else r['monkey_pair'][0]
-                        leader_letter = abbrev[leader_full]
-                        follower_letter = abbrev[follower_full]
-
-                        label1 = f"Leader➜Follower: {b1 if leader == a1 else b2} ({leader_letter}, {leader}) ➜ {b2 if leader == a1 else b1} ({follower_letter}, {follower})"
-                        label2 = f"Follower➜Leader: {b2 if leader == a1 else b1} ({follower_letter}, {follower}) ➜ {b1 if leader == a1 else b2} ({leader_letter}, {leader})"
-
-                        self._plot_crosscorr_result_on_ax(ax, *l2f, color=color, label=label1, linestyle="-")
-                        self._plot_crosscorr_result_on_ax(ax, *f2l, color=color, label=label2, linestyle="--")
-
-                ax_face.set_title(f"{period_type.capitalize()} | m1_face vs m2_face", fontsize=11)
-                ax_other.set_title(f"{period_type.capitalize()} | Other comparisons", fontsize=11)
-                ax_face.set_xlabel("Lag (s)")
-                ax_other.set_xlabel("Lag (s)")
-                ax_face.set_ylabel("Δ Crosscorr")
-
-                if i == 0:
-                    ax_face.legend(fontsize=7, loc='upper right', frameon=True)
-                    ax_other.legend(fontsize=7, loc='upper right', frameon=True)
-
-                for ax_ in [ax_face, ax_other]:
-                    ax_.axhline(0, linestyle="-", color="black", linewidth=0.9)
-                    ax_.axvline(0, linestyle="-", color="black", linewidth=0.9)
-                    ax_.grid(True, linestyle='--', linewidth=0.4, alpha=0.6)
-
-            plt.suptitle(f"Δ Crosscorr | {monkey_pair_str} | strategy={plot_strategy}", fontsize=14)
-            plt.tight_layout(rect=[0, 0, 1, 0.96])
-            suffix = f"_strategy_{plot_strategy}"
-            fname = f"{monkey_pair_str.replace(' ', '_').replace('-', '_')}_crosscorr_deltas_combined_grid{suffix}.png"
-            plt.savefig(plot_dir / fname, dpi=200)
-            plt.close()
-
-        logger.info(f"All Δ crosscorr grid plots saved to: {plot_dir}")
-
-
-
-
-    def _prepare_lags_and_delta_for_plotting(self, r, alpha):
-        lags = r["lags"][0] if isinstance(r["lags"], list) else r["lags"]
-        mean_delta = r["mean_delta"][0] if isinstance(r["mean_delta"], list) else r["mean_delta"]
-        p_values = r["p_values"][0] if isinstance(r["p_values"], list) else r["p_values"]
-
-        # Trim to ±15 sec (assuming 1kHz sampling)
-        lag_mask = (lags >= -15000) & (lags <= 15000)
-        lags_sec = lags[lag_mask] / 1000.0
-        mean_delta = mean_delta[lag_mask]
-        p_values = p_values[lag_mask]
-        sig_mask = (p_values < alpha) & (mean_delta > 0)
-
-        return lags_sec, mean_delta, p_values, sig_mask
-
-
-    def _parse_agents_and_behaviors(self, comparison_str):
-        try:
-            a1, b1 = comparison_str.split("__vs__")[0].split("_", 1)
-            a2, b2 = comparison_str.split("__vs__")[1].split("_", 1)
-            return a1, b1, a2, b2
-        except ValueError:
-            logger.warning(f"Could not parse comparison string: {comparison_str}")
-            return None, None, None, None
-
-
-    def _choose_axis_from_comparison(self, comparison_str, ax_face, ax_other):
-        if "m1_face_fixation" in comparison_str and "m2_face_fixation" in comparison_str:
-            return ax_face
-        return ax_other
-
-
-    def _plot_crosscorr_result_on_ax(self, ax, lags_sec, mean_delta, p_values, sig_mask, color, label, linestyle="-"):
-        # Plot base line (all points, faded)
-        ax.plot(lags_sec, mean_delta, label=label, color=color, linewidth=1.2, linestyle=linestyle, alpha=0.5)
-
-        # Overlay bold segments where significant
-        if np.any(sig_mask):
-            sig_indices = np.where(sig_mask)[0]
-            chunks = np.split(sig_indices, np.where(np.diff(sig_indices) > 1)[0] + 1)
-            for chunk in chunks:
-                ax.plot(
-                    lags_sec[chunk],
-                    mean_delta[chunk],
-                    color=color,
-                    linewidth=2.5,
-                    linestyle=linestyle,
-                    alpha=1.0
-                )
+            df = pd.read_pickle(result_path)
+            _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=alpha)
 
 
 # ------------------------
@@ -1037,3 +879,100 @@ def _aggregate_and_test(df, strategy):
 
     return pd.DataFrame(result_rows)
 
+
+# ----------
+# Plotting
+# -----------
+
+import os
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.ndimage import label
+
+
+def _plot_crosscorr_with_significance(ax, lags, mean_delta, p_values, alpha, color, label_name):
+    """Plot cross-correlation with non-significant and significant portions separated."""
+    sig_mask = p_values < alpha
+
+    # Plot full line (low alpha)
+    ax.plot(lags, mean_delta, linewidth=1.0, alpha=0.3, color=color, label=f"{label_name} (all)")
+
+    # Find contiguous regions of significance and plot separately with higher alpha and linewidth
+    labeled_array, num_features = label(sig_mask)
+    for i in range(1, num_features + 1):
+        indices = np.where(labeled_array == i)[0]
+        ax.plot(lags[indices], mean_delta[indices], linewidth=2.0, alpha=1.0, color=color, label=f"{label_name} (sig)" if i == 1 else None)
+
+
+def _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=0.05, max_lag_ms=10000):
+    """Generate and save plots for cross-correlation deltas for a specific strategy."""
+    from matplotlib import cm
+    import matplotlib.gridspec as gridspec
+
+    df = df[df["lags"].apply(lambda x: np.max(np.abs(x)) >= max_lag_ms)]
+    strategy_dir = Path(plot_dir) / strategy
+    strategy_dir.mkdir(parents=True, exist_ok=True)
+
+    all_keys = df["monkey_pair"].unique()
+
+    # Plot for each monkey_pair including "ALL"
+    for monkey_pair in all_keys:
+        df_pair = df[df["monkey_pair"] == monkey_pair]
+        if df_pair.empty:
+            continue
+
+        period_types = sorted(df_pair["period_type"].unique())
+        ab_combos = df_pair[["a1", "b1", "a2", "b2"]].drop_duplicates().to_records(index=False)
+
+        n_rows = len(period_types)
+        n_cols = len(ab_combos)
+
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), squeeze=False)
+        fig.subplots_adjust(hspace=0.4, wspace=0.3)
+
+        for i, period in enumerate(period_types):
+            for j, (a1, b1, a2, b2) in enumerate(ab_combos):
+                ax = axs[i][j]
+                df_subset = df_pair[
+                    (df_pair["period_type"] == period)
+                    & (df_pair["a1"] == a1) & (df_pair["b1"] == b1)
+                    & (df_pair["a2"] == a2) & (df_pair["b2"] == b2)
+                ]
+
+                if df_subset.empty:
+                    ax.set_title(f"{a1}-{b1} ↔ {a2}-{b2} ({period})\n[No data]")
+                    continue
+
+                for label_direction in df_subset["direction_label"].unique():
+                    row = df_subset[df_subset["direction_label"] == label_direction].iloc[0]
+                    lags = row["lags"]
+                    mask = np.abs(lags) <= max_lag_ms
+                    _plot_crosscorr_with_significance(
+                        ax,
+                        lags[mask],
+                        row["mean_delta"][mask],
+                        row["p_values"][mask],
+                        alpha=alpha,
+                        color="tab:red" if "→" in label_direction else "tab:blue",
+                        label_name=label_direction
+                    )
+
+                ax.axhline(0, color="gray", linestyle="--", linewidth=0.5)
+                ax.set_title(f"{period}: {a1}-{b1} vs {a2}-{b2}")
+                ax.set_xlabel("Lag (ms)")
+                ax.set_ylabel("Δ correlation")
+
+        m1, m2 = df_pair.iloc[0]["m1"], df_pair.iloc[0]["m2"]
+        dom = df_pair.iloc[0].get("monkey_dominant", "N/A")
+
+        if monkey_pair != "ALL":
+            title = f"{monkey_pair} | m1: {m1}, m2: {m2} | Dominant: {dom}"
+        else:
+            title = "Averaged Across All Pairs"
+
+        fig.suptitle(f"Crosscorr Δ (Observed - Shuffled) [{strategy}] | {title}", fontsize=16)
+        save_path = strategy_dir / f"{monkey_pair.replace(' ', '_')}.png"
+        fig.savefig(save_path, dpi=300)
+        plt.close(fig)
