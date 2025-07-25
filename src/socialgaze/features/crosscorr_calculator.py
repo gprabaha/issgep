@@ -884,12 +884,15 @@ def _aggregate_and_test(df, strategy):
 # Plotting
 # -----------
 
+# Re-import necessary modules after code execution environment reset
 import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.ndimage import label
+from matplotlib.lines import Line2D
+from itertools import cycle
 
 
 def _plot_crosscorr_with_significance(ax, lags, mean_delta, p_values, alpha, color, label_name):
@@ -908,16 +911,17 @@ def _plot_crosscorr_with_significance(ax, lags, mean_delta, p_values, alpha, col
 
 def _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=0.05, max_lag_ms=10000):
     """Generate and save plots for cross-correlation deltas for a specific strategy."""
-    from matplotlib import cm
-    import matplotlib.gridspec as gridspec
-
     df = df[df["lags"].apply(lambda x: np.max(np.abs(x)) >= max_lag_ms)]
     strategy_dir = Path(plot_dir) / strategy
     strategy_dir.mkdir(parents=True, exist_ok=True)
 
     all_keys = df["monkey_pair"].unique()
 
-    # Plot for each monkey_pair including "ALL"
+    # Color mapping for different direction labels
+    unique_directions = df["direction_label"].unique()
+    color_cycle = cycle(plt.cm.tab10.colors)
+    direction_to_color = {label: next(color_cycle) for label in sorted(unique_directions)}
+
     for monkey_pair in all_keys:
         df_pair = df[df["monkey_pair"] == monkey_pair]
         if df_pair.empty:
@@ -929,8 +933,8 @@ def _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=0.05, max_lag_ms=1
         n_rows = len(period_types)
         n_cols = len(ab_combos)
 
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), squeeze=False)
-        fig.subplots_adjust(hspace=0.4, wspace=0.3)
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(4.5 * n_cols, 3.5 * n_rows), squeeze=False)
+        fig.subplots_adjust(hspace=0.35, wspace=0.25)
 
         for i, period in enumerate(period_types):
             for j, (a1, b1, a2, b2) in enumerate(ab_combos):
@@ -942,27 +946,40 @@ def _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=0.05, max_lag_ms=1
                 ]
 
                 if df_subset.empty:
-                    ax.set_title(f"{a1}-{b1} ↔ {a2}-{b2} ({period})\n[No data]")
+                    ax.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax.transAxes)
                     continue
 
-                for label_direction in df_subset["direction_label"].unique():
+                # Plot each direction separately
+                for k, label_direction in enumerate(sorted(df_subset["direction_label"].unique())):
                     row = df_subset[df_subset["direction_label"] == label_direction].iloc[0]
                     lags = row["lags"]
                     mask = np.abs(lags) <= max_lag_ms
+
                     _plot_crosscorr_with_significance(
                         ax,
                         lags[mask],
                         row["mean_delta"][mask],
                         row["p_values"][mask],
                         alpha=alpha,
-                        color="tab:red" if "→" in label_direction else "tab:blue",
-                        label_name=label_direction
+                        color=direction_to_color[label_direction],
+                        label_name=label_direction if i == 0 else None  # Show label only in top row
                     )
 
                 ax.axhline(0, color="gray", linestyle="--", linewidth=0.5)
-                ax.set_title(f"{period}: {a1}-{b1} vs {a2}-{b2}")
-                ax.set_xlabel("Lag (ms)")
-                ax.set_ylabel("Δ correlation")
+                if i == n_rows - 1:
+                    ax.set_xlabel("Lag (ms)")
+                if j == 0:
+                    ax.set_ylabel("Δ correlation")
+
+        # Add row labels (period types)
+        for row_idx, period in enumerate(period_types):
+            axs[row_idx][0].annotate(period, xy=(-0.4, 0.5), xycoords='axes fraction',
+                                     fontsize=12, ha='center', va='center', rotation=90)
+
+        # Add column labels (a1-b1 vs a2-b2)
+        for col_idx, (a1, b1, a2, b2) in enumerate(ab_combos):
+            col_label = f"{a1}-{b1}\nvs\n{a2}-{b2}"
+            axs[0][col_idx].set_title(col_label, fontsize=11)
 
         m1, m2 = df_pair.iloc[0]["m1"], df_pair.iloc[0]["m2"]
         dom = df_pair.iloc[0].get("monkey_dominant", "N/A")
@@ -972,7 +989,13 @@ def _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=0.05, max_lag_ms=1
         else:
             title = "Averaged Across All Pairs"
 
-        fig.suptitle(f"Crosscorr Δ (Observed - Shuffled) [{strategy}] | {title}", fontsize=16)
+        fig.suptitle(f"Crosscorr Δ (Observed - Shuffled) [{strategy}] | {title}", fontsize=14)
+
+        # Add legend manually to the right
+        handles = [Line2D([0], [0], color=color, lw=2, label=label)
+                   for label, color in direction_to_color.items()]
+        fig.legend(handles=handles, loc='upper right', bbox_to_anchor=(1.02, 1.0), fontsize=10)
+
         save_path = strategy_dir / f"{monkey_pair.replace(' ', '_')}.png"
-        fig.savefig(save_path, dpi=300)
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close(fig)
