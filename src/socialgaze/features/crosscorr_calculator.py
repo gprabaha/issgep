@@ -782,36 +782,40 @@ def _assign_leaders_by_crosscorr(df):
     df["leader_based_direction"] = "unknown"
     df["monkey_leader"] = "unknown"
 
-    group_keys = df.groupby(["monkey_pair", "period_type", "a1", "b1", "a2", "b2"]).groups.keys()
+    group_keys = df.groupby([
+        "monkey_pair", "period_type",
+        "sender_behavior", "receiver_behavior"
+    ]).groups.keys()
 
     for key in group_keys:
-        monkey_pair, period_type, a1, b1, a2, b2 = key
-        mask = (
+        monkey_pair, period_type, sender_behavior, receiver_behavior = key
+
+        mask_all = (
             (df["monkey_pair"] == monkey_pair) &
             (df["period_type"] == period_type) &
-            (df["a1"] == a1) & (df["b1"] == b1) &
-            (df["a2"] == a2) & (df["b2"] == b2)
+            (df["sender_behavior"] == sender_behavior) &
+            (df["receiver_behavior"] == receiver_behavior)
         )
 
-        df_subset = df[mask]
-        pos_mean = df_subset[df_subset["lag_direction"] == "positive_lags"]["avg_delta"].mean()
-        neg_mean = df_subset[df_subset["lag_direction"] == "negative_lags_flipped"]["avg_delta"].mean()
+        mask_m1_sender = mask_all & (df["sender_agent"] == "m1")
+        mask_m2_sender = mask_all & (df["sender_agent"] == "m2")
 
-        if pd.isna(pos_mean) or pd.isna(neg_mean):
-            label_pos, label_neg = "unknown", "unknown"
+        mean_m1 = df.loc[mask_m1_sender, "avg_delta"].mean()
+        mean_m2 = df.loc[mask_m2_sender, "avg_delta"].mean()
+
+        if pd.isna(mean_m1) or pd.isna(mean_m2):
             monkey_leader = "unknown"
-        elif pos_mean > neg_mean:
-            label_pos, label_neg = "leader_to_follower", "follower_to_leader"
-            monkey_leader = a1
+        elif mean_m1 > mean_m2:
+            monkey_leader = "m1"
         else:
-            label_pos, label_neg = "follower_to_leader", "leader_to_follower"
-            monkey_leader = a2
+            monkey_leader = "m2"
 
-        df.loc[mask & (df["lag_direction"] == "positive_lags"), "leader_based_direction"] = label_pos
-        df.loc[mask & (df["lag_direction"] == "negative_lags_flipped"), "leader_based_direction"] = label_neg
-        df.loc[mask, "monkey_leader"] = monkey_leader
+        # Assign labels based on who is the sender
+        df.loc[mask_all, "monkey_leader"] = monkey_leader
+        df.loc[mask_all & (df["sender_agent"] == monkey_leader), "leader_based_direction"] = "leader_to_follower"
+        df.loc[mask_all & (df["receiver_agent"] == monkey_leader), "leader_based_direction"] = "follower_to_leader"
+
     return df
-
 
 
 def _assign_dominance_direction(df):
@@ -820,10 +824,12 @@ def _assign_dominance_direction(df):
         dom = row["monkey_dominant"]
         if dom is None or pd.isna(dom):
             labels.append("unknown")
-        elif row["lag_direction"] == "positive_lags":
-            labels.append("dominant_to_recessive" if row["a1"] == dom else "recessive_to_dominant")
+        elif row["sender_agent"] == dom:
+            labels.append("dominant_to_recessive")
+        elif row["receiver_agent"] == dom:
+            labels.append("recessive_to_dominant")
         else:
-            labels.append("dominant_to_recessive" if row["a2"] == dom else "recessive_to_dominant")
+            labels.append("unknown")
     df["dominance_based_direction"] = labels
     return df
 
