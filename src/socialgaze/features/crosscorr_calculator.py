@@ -336,7 +336,7 @@ class CrossCorrCalculator:
         df = pd.DataFrame(expanded_rows)
         df = _assign_leaders_by_crosscorr(df)
         df = _assign_dominance_direction(df)
-        
+
         strategies_to_run = VALID_STRATEGIES if analysis_strategy is None else [analysis_strategy]
         for strategy in strategies_to_run:
             result_df = _aggregate_and_test(df, strategy)
@@ -755,11 +755,9 @@ def _construct_shuffled_vector(segments: List[Tuple[int, int]], run_length: int)
 
 def _assign_leaders_by_crosscorr(df):
     df["avg_delta"] = df["delta"].apply(np.mean)
-
-    # Prepare a new column for assignment
     df["leader_based_direction"] = "unknown"
+    df["monkey_leader"] = "unknown"
 
-    # Get unique group keys
     group_keys = df.groupby(["monkey_pair", "period_type", "a1", "b1", "a2", "b2"]).groups.keys()
 
     for key in group_keys:
@@ -777,15 +775,19 @@ def _assign_leaders_by_crosscorr(df):
 
         if pd.isna(pos_mean) or pd.isna(neg_mean):
             label_pos, label_neg = "unknown", "unknown"
+            monkey_leader = "unknown"
         elif pos_mean > neg_mean:
             label_pos, label_neg = "leader_to_follower", "follower_to_leader"
+            monkey_leader = a1
         else:
             label_pos, label_neg = "follower_to_leader", "leader_to_follower"
+            monkey_leader = a2
 
         df.loc[mask & (df["lag_direction"] == "positive_lags"), "leader_based_direction"] = label_pos
         df.loc[mask & (df["lag_direction"] == "negative_lags_flipped"), "leader_based_direction"] = label_neg
-
+        df.loc[mask, "monkey_leader"] = monkey_leader
     return df
+
 
 
 def _assign_dominance_direction(df):
@@ -825,7 +827,6 @@ def _aggregate_and_test(df, strategy):
         deltas = np.vstack(group["delta"].to_numpy())
         mean_delta = deltas.mean(axis=0)
         _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
-
         rep = group.iloc[0]
 
         result_rows.append({
@@ -833,6 +834,7 @@ def _aggregate_and_test(df, strategy):
             "period_type": period_type,
             "direction_label": direction_label,
             "effective_direction": rep["effective_direction"],
+            "lag_direction": rep["lag_direction"],
             "lags": lags,
             "mean_delta": mean_delta,
             "p_values": p_vals,
@@ -843,10 +845,11 @@ def _aggregate_and_test(df, strategy):
             "b2": b2,
             "m1": rep["m1"],
             "m2": rep["m2"],
+            "monkey_leader": rep["monkey_leader"],
             "monkey_dominant": rep.get("monkey_dominant", None)
         })
 
-    # Global aggregation across all monkey pairs
+    # Global aggregation
     grouped_all = filter_df.groupby([grouping_col, "period_type", "a1", "b1", "a2", "b2"])
     for key, group in grouped_all:
         direction_label, period_type, a1, b1, a2, b2 = key
@@ -857,13 +860,12 @@ def _aggregate_and_test(df, strategy):
         mean_delta = deltas.mean(axis=0)
         _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
 
-        rep = group.iloc[0]
-
         result_rows.append({
             "monkey_pair": "ALL",
             "period_type": period_type,
             "direction_label": direction_label,
-            "effective_direction": rep["effective_direction"],
+            "effective_direction": direction_label,
+            "lag_direction": None,
             "lags": lags,
             "mean_delta": mean_delta,
             "p_values": p_vals,
@@ -872,12 +874,14 @@ def _aggregate_and_test(df, strategy):
             "a2": a2,
             "b1": b1,
             "b2": b2,
-            "m1": rep["m1"],
-            "m2": rep["m2"],
-            "monkey_dominant": rep.get("monkey_dominant", None)
+            "m1": None, 
+            "m2": None,
+            "monkey_leader": None,
+            "monkey_dominant": None
         })
 
     return pd.DataFrame(result_rows)
+
 
 
 # ----------
