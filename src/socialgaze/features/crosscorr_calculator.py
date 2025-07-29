@@ -32,6 +32,7 @@ from socialgaze.utils.path_utils import CrossCorrPaths
 logger = logging.getLogger(__name__)
 
 
+
 class CrossCorrCalculator:
     """
     Computes cross-correlations and shuffled cross-correlations between binary behavioral vectors 
@@ -323,7 +324,6 @@ class CrossCorrCalculator:
             for _, row in self.config.monkey_dominance_df.iterrows()
         }
         
-
         expanded_rows = []
         for a1, b1, a2, b2 in self.config.crosscorr_agent_behavior_pairs:
             for period_type in ["full", "interactive", "non_interactive"]:
@@ -334,12 +334,12 @@ class CrossCorrCalculator:
                 )
         
         df = pd.DataFrame(expanded_rows)
-        df = _assign_leaders_by_crosscorr(df)
-        df = _assign_dominance_direction(df)
+        df = _assign_monkey_leader_column(df)
 
         strategies_to_run = VALID_STRATEGIES if analysis_strategy is None else [analysis_strategy]
         for strategy in strategies_to_run:
             result_df = _aggregate_and_test(df, strategy)
+            pdb.set_trace()
             self.save_crosscorr_analysis_results(result_df, strategy=strategy)
 
 
@@ -422,7 +422,6 @@ class CrossCorrCalculator:
             })
 
         return rows
-
 
 
     def save_crosscorr_analysis_results(self, results: pd.DataFrame, strategy: str):
@@ -777,9 +776,8 @@ def _construct_shuffled_vector(segments: List[Tuple[int, int]], run_length: int)
 # Data analysis helpers
 # ---------------------
 
-def _assign_leaders_by_crosscorr(df):
+def _assign_monkey_leader_column(df):
     df["avg_delta"] = df["delta"].apply(np.mean)
-    df["leader_based_direction"] = "unknown"
     df["monkey_leader"] = "unknown"
 
     group_keys = df.groupby([
@@ -810,107 +808,122 @@ def _assign_leaders_by_crosscorr(df):
         else:
             monkey_leader = "m2"
 
-        # Assign labels based on who is the sender
         df.loc[mask_all, "monkey_leader"] = monkey_leader
-        df.loc[mask_all & (df["sender_agent"] == monkey_leader), "leader_based_direction"] = "leader_to_follower"
-        df.loc[mask_all & (df["receiver_agent"] == monkey_leader), "leader_based_direction"] = "follower_to_leader"
 
-    return df
-
-
-def _assign_dominance_direction(df):
-    labels = []
-    for _, row in df.iterrows():
-        dom = row["monkey_dominant"]
-        if dom is None or pd.isna(dom):
-            labels.append("unknown")
-        elif row["sender_agent"] == dom:
-            labels.append("dominant_to_recessive")
-        elif row["receiver_agent"] == dom:
-            labels.append("recessive_to_dominant")
-        else:
-            labels.append("unknown")
-    df["dominance_based_direction"] = labels
     return df
 
 
 def _aggregate_and_test(df, strategy):
+    result_rows = []
+    direction_labels = _get_direction_labels_for_strategy(strategy)
+
+    # Per-monkey-pair aggregation
+    grouped = df.groupby([
+        "monkey_pair", "period_type",
+        "sender_behavior", "receiver_behavior"
+    ])
+
+    for (monkey_pair, period_type, sender_behavior, receiver_behavior), group in grouped:
+        for direction_label in direction_labels:
+            subset = group[group.apply(lambda row: _get_direction_label_for_row(row, strategy) == direction_label, axis=1)]
+            if subset.empty:
+                continue
+
+            lags = subset.iloc[0]["lags"]
+            deltas = np.vstack(subset["delta"].to_numpy())
+            mean_delta = deltas.mean(axis=0)
+            _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
+            rep = subset.iloc[0]
+
+            result_rows.append({
+                "monkey_pair": monkey_pair,
+                "period_type": period_type,
+                "direction_label": direction_label,
+                "effective_direction": rep["effective_direction"],
+                "lag_direction": rep["lag_direction"],
+                "lags": lags,
+                "mean_delta": mean_delta,
+                "p_values": p_vals,
+                "n_runs": len(subset),
+                "sender_agent": rep["sender_agent"],
+                "receiver_agent": rep["receiver_agent"],
+                "sender_behavior": sender_behavior,
+                "receiver_behavior": receiver_behavior,
+                "m1": rep["m1"],
+                "m2": rep["m2"],
+                "monkey_leader": rep.get("monkey_leader", None),
+                "monkey_dominant": rep.get("monkey_dominant", None)
+            })
+
+    # Global aggregation
+    grouped_all = df.groupby([
+        "period_type", "sender_behavior", "receiver_behavior"
+    ])
+
+    for (period_type, sender_behavior, receiver_behavior), group in grouped_all:
+        for direction_label in direction_labels:
+            subset = group[group.apply(lambda row: _get_direction_label(row, strategy) == direction_label, axis=1)]
+            if subset.empty:
+                continue
+
+            lags = subset.iloc[0]["lags"]
+            deltas = np.vstack(subset["delta"].to_numpy())
+            mean_delta = deltas.mean(axis=0)
+            _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
+
+            result_rows.append({
+                "monkey_pair": "ALL",
+                "period_type": period_type,
+                "direction_label": direction_label,
+                "effective_direction": None,
+                "lag_direction": None,
+                "lags": lags,
+                "mean_delta": mean_delta,
+                "p_values": p_vals,
+                "n_runs": len(subset),
+                "sender_agent": None,
+                "receiver_agent": None,
+                "sender_behavior": sender_behavior,
+                "receiver_behavior": receiver_behavior,
+                "m1": None,
+                "m2": None,
+                "monkey_leader": None,
+                "monkey_dominant": None
+            })
+
+    return pd.DataFrame(result_rows)
+
+
+def _get_direction_labels_for_strategy(strategy):
     if strategy == "default":
-        grouping_col = "effective_direction"
-        filter_df = df
+        return ["m1_to_m2", "m2_to_m1"]
     elif strategy == "by_dominance":
-        grouping_col = "dominance_based_direction"
-        filter_df = df[df[grouping_col].isin(["dominant_to_recessive", "recessive_to_dominant"])]
+        return ["dominant_to_recessive", "recessive_to_dominant"]
     elif strategy == "by_leader_follower":
-        grouping_col = "leader_based_direction"
-        filter_df = df[df[grouping_col].isin(["leader_to_follower", "follower_to_leader"])]
+        return ["leader_to_follower", "follower_to_leader"]
     else:
         raise ValueError(f"Invalid strategy: {strategy}")
 
-    result_rows = []
 
-    # Per-monkey-pair aggregation
-    grouped = filter_df.groupby(["monkey_pair", "period_type", grouping_col, "a1", "b1", "a2", "b2"])
-    for key, group in grouped:
-        monkey_pair, period_type, direction_label, a1, b1, a2, b2 = key
-        lags = group.iloc[0]["lags"]
-        deltas = np.vstack(group["delta"].to_numpy())
-        mean_delta = deltas.mean(axis=0)
-        _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
-        rep = group.iloc[0]
+def _get_direction_label_for_row(row, strategy):
+    if strategy == "default":
+        return "m1_to_m2" if row["sender_agent"] == "m1" else "m2_to_m1"
 
-        result_rows.append({
-            "monkey_pair": monkey_pair,
-            "period_type": period_type,
-            "direction_label": direction_label,
-            "effective_direction": rep["effective_direction"],
-            "lag_direction": rep["lag_direction"],
-            "lags": lags,
-            "mean_delta": mean_delta,
-            "p_values": p_vals,
-            "n_runs": len(group),
-            "a1": a1,
-            "a2": a2,
-            "b1": b1,
-            "b2": b2,
-            "m1": rep["m1"],
-            "m2": rep["m2"],
-            "monkey_leader": rep["monkey_leader"],
-            "monkey_dominant": rep.get("monkey_dominant", None)
-        })
+    elif strategy == "by_dominance":
+        dom = row.get("monkey_dominant")
+        if pd.isna(dom) or dom is None:
+            return "unknown"
+        return "dominant_to_recessive" if row["sender_agent"] == dom else "recessive_to_dominant"
 
-    # Global aggregation
-    grouped_all = filter_df.groupby([grouping_col, "period_type", "a1", "b1", "a2", "b2"])
-    for key, group in grouped_all:
-        direction_label, period_type, a1, b1, a2, b2 = key
-        if group.empty:
-            continue
-        lags = group.iloc[0]["lags"]
-        deltas = np.vstack(group["delta"].to_numpy())
-        mean_delta = deltas.mean(axis=0)
-        _, p_vals = ttest_1samp(deltas, popmean=0, axis=0, alternative="greater")
+    elif strategy == "by_leader_follower":
+        leader = row.get("monkey_leader")
+        if pd.isna(leader) or leader is None:
+            return "unknown"
+        return "leader_to_follower" if row["sender_agent"] == leader else "follower_to_leader"
 
-        result_rows.append({
-            "monkey_pair": "ALL",
-            "period_type": period_type,
-            "direction_label": direction_label,
-            "effective_direction": direction_label,
-            "lag_direction": None,
-            "lags": lags,
-            "mean_delta": mean_delta,
-            "p_values": p_vals,
-            "n_runs": len(group),
-            "a1": a1,
-            "a2": a2,
-            "b1": b1,
-            "b2": b2,
-            "m1": None, 
-            "m2": None,
-            "monkey_leader": None,
-            "monkey_dominant": None
-        })
+    else:
+        raise ValueError(f"Invalid strategy: {strategy}")
 
-    return pd.DataFrame(result_rows)
 
 
 
