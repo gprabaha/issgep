@@ -28,6 +28,12 @@ from socialgaze.utils.hpc_utils import (
     track_job_completion
 )
 from socialgaze.utils.path_utils import CrossCorrPaths
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from itertools import product
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +345,6 @@ class CrossCorrCalculator:
         strategies_to_run = VALID_STRATEGIES if analysis_strategy is None else [analysis_strategy]
         for strategy in strategies_to_run:
             result_df = _aggregate_and_test(df, strategy)
-            pdb.set_trace()
             self.save_crosscorr_analysis_results(result_df, strategy=strategy)
 
 
@@ -395,7 +400,6 @@ class CrossCorrCalculator:
                 "receiver_behavior": behavior2,
                 "m1": m1,
                 "m2": m2,
-                "effective_direction": f"{agent1}_{behavior1} → {agent2}_{behavior2}",
                 "lag_direction": "positive_lags",
                 "lags": lags[pos_mask],
                 "delta": delta[pos_mask],
@@ -414,7 +418,6 @@ class CrossCorrCalculator:
                 "receiver_behavior": behavior1,
                 "m1": m1,
                 "m2": m2,
-                "effective_direction": f"{agent2}_{behavior2} → {agent1}_{behavior1}",
                 "lag_direction": "negative_lags_flipped",
                 "lags": -lags[neg_mask][::-1],
                 "delta": delta[neg_mask][::-1],
@@ -839,7 +842,6 @@ def _aggregate_and_test(df, strategy):
                 "monkey_pair": monkey_pair,
                 "period_type": period_type,
                 "direction_label": direction_label,
-                "effective_direction": rep["effective_direction"],
                 "lag_direction": rep["lag_direction"],
                 "lags": lags,
                 "mean_delta": mean_delta,
@@ -862,7 +864,7 @@ def _aggregate_and_test(df, strategy):
 
     for (period_type, sender_behavior, receiver_behavior), group in grouped_all:
         for direction_label in direction_labels:
-            subset = group[group.apply(lambda row: _get_direction_label(row, strategy) == direction_label, axis=1)]
+            subset = group[group.apply(lambda row: _get_direction_label_for_row(row, strategy) == direction_label, axis=1)]
             if subset.empty:
                 continue
 
@@ -875,7 +877,6 @@ def _aggregate_and_test(df, strategy):
                 "monkey_pair": "ALL",
                 "period_type": period_type,
                 "direction_label": direction_label,
-                "effective_direction": None,
                 "lag_direction": None,
                 "lags": lags,
                 "mean_delta": mean_delta,
@@ -926,123 +927,98 @@ def _get_direction_label_for_row(row, strategy):
 
 
 
-
 # ----------
 # Plotting
 # -----------
 
-# Re-import necessary modules after code execution environment reset
-import os
-from pathlib import Path
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.ndimage import label
-from matplotlib.lines import Line2D
-from itertools import cycle
 
+def _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=0.05):
+    direction_labels = df["direction_label"].unique()
+    monkey_pairs = df["monkey_pair"].unique()
+    sender_receiver_pairs = df[["sender_behavior", "receiver_behavior"]].drop_duplicates().values.tolist()
+    period_types = df["period_type"].unique()
 
-def _plot_crosscorr_with_significance(ax, lags, mean_delta, p_values, alpha, color, label_name):
-    """Plot cross-correlation with non-significant and significant portions separated."""
-    sig_mask = p_values < alpha
-
-    # Plot full line (low alpha)
-    ax.plot(lags, mean_delta, linewidth=1.0, alpha=0.3, color=color, label=f"{label_name} (all)")
-
-    # Find contiguous regions of significance and plot separately with higher alpha and linewidth
-    labeled_array, num_features = label(sig_mask)
-    for i in range(1, num_features + 1):
-        indices = np.where(labeled_array == i)[0]
-        ax.plot(lags[indices], mean_delta[indices], linewidth=2.0, alpha=1.0, color=color, label=f"{label_name} (sig)" if i == 1 else None)
-
-
-def _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=0.05, max_lag_ms=10000):
-    """Generate and save plots for cross-correlation deltas for a specific strategy."""
-    df = df[df["lags"].apply(lambda x: np.max(np.abs(x)) >= max_lag_ms)]
-    strategy_dir = Path(plot_dir) / strategy
-    strategy_dir.mkdir(parents=True, exist_ok=True)
-
-    all_keys = df["monkey_pair"].unique()
-
-    # Color mapping for different direction labels
-    unique_directions = df["direction_label"].unique()
-    color_cycle = cycle(plt.cm.tab10.colors)
-    direction_to_color = {label: next(color_cycle) for label in sorted(unique_directions)}
-
-    for monkey_pair in all_keys:
-        df_pair = df[df["monkey_pair"] == monkey_pair]
-        if df_pair.empty:
-            continue
-
-        period_types = sorted(df_pair["period_type"].unique())
-        ab_combos = df_pair[["a1", "b1", "a2", "b2"]].drop_duplicates().to_records(index=False)
+    for monkey_pair in monkey_pairs:
+        pair_df = df[df["monkey_pair"] == monkey_pair]
+        m1, m2 = pair_df["m1"].dropna().unique(), pair_df["m2"].dropna().unique()
+        monkey_dominant = pair_df["monkey_dominant"].dropna().unique()
+        monkey_leader = pair_df["monkey_leader"].dropna().unique()
 
         n_rows = len(period_types)
-        n_cols = len(ab_combos)
+        n_cols = len(sender_receiver_pairs)
 
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(4.5 * n_cols, 3.5 * n_rows), squeeze=False)
-        fig.subplots_adjust(hspace=0.35, wspace=0.25)
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.5 * n_cols, 3.5 * n_rows), squeeze=False, sharex=True)
+
+        colors = plt.cm.get_cmap("tab10", len(direction_labels))
+        legend_handles = {}
 
         for i, period in enumerate(period_types):
-            for j, (a1, b1, a2, b2) in enumerate(ab_combos):
-                ax = axs[i][j]
-                df_subset = df_pair[
-                    (df_pair["period_type"] == period)
-                    & (df_pair["a1"] == a1) & (df_pair["b1"] == b1)
-                    & (df_pair["a2"] == a2) & (df_pair["b2"] == b2)
+            for j, (sender_behavior, receiver_behavior) in enumerate(sender_receiver_pairs):
+                ax = axes[i][j]
+                subset = pair_df[
+                    (pair_df["period_type"] == period) &
+                    (pair_df["sender_behavior"] == sender_behavior) &
+                    (pair_df["receiver_behavior"] == receiver_behavior)
                 ]
+                for k, label in enumerate(direction_labels):
+                    row = subset[subset["direction_label"] == label]
+                    if row.empty:
+                        continue
+                    row = row.iloc[0]
+                    lags = np.array(row["lags"]) / 1000  # Convert ms to seconds
+                    mean_delta = row["mean_delta"]
+                    p_vals = row["p_values"]
+                    sig_mask = (p_vals < alpha)
 
-                if df_subset.empty:
-                    ax.text(0.5, 0.5, "No Data", ha='center', va='center', transform=ax.transAxes)
-                    continue
+                    # Plot full line (low alpha)
+                    base_line, = ax.plot(lags, mean_delta, color=colors(k), alpha=0.3, lw=1)
 
-                # Plot each direction separately
-                for k, label_direction in enumerate(sorted(df_subset["direction_label"].unique())):
-                    row = df_subset[df_subset["direction_label"] == label_direction].iloc[0]
-                    lags = row["lags"]
-                    mask = np.abs(lags) <= max_lag_ms
+                    # Plot thick segments only on significant chunks
+                    sig_indices = np.where(sig_mask)[0]
+                    if len(sig_indices) > 0:
+                        chunks = np.split(sig_indices, np.where(np.diff(sig_indices) != 1)[0]+1)
+                        for chunk in chunks:
+                            highlight_line, = ax.plot(lags[chunk], mean_delta[chunk], color=colors(k), alpha=1.0, lw=2)
+                        # Store handle for legend (just once per label)
+                        if label not in legend_handles:
+                            legend_handles[label] = highlight_line
 
-                    _plot_crosscorr_with_significance(
-                        ax,
-                        lags[mask],
-                        row["mean_delta"][mask],
-                        row["p_values"][mask],
-                        alpha=alpha,
-                        color=direction_to_color[label_direction],
-                        label_name=label_direction if i == 0 else None  # Show label only in top row
-                    )
-
-                ax.axhline(0, color="gray", linestyle="--", linewidth=0.5)
-                if i == n_rows - 1:
-                    ax.set_xlabel("Lag (ms)")
                 if j == 0:
-                    ax.set_ylabel("Δ correlation")
+                    ax.set_ylabel(f"{period}", fontsize=10)
+                if i == n_rows - 1:
+                    ax.set_xlabel("Lag (s)", fontsize=10)
+                if j == 0 and i == 0:
+                    ax.set_title(f"{sender_behavior} → {receiver_behavior}", fontsize=10)
+                elif i == 0:
+                    ax.set_title(f"{sender_behavior} → {receiver_behavior}", fontsize=10)
 
-        # Add row labels (period types)
-        for row_idx, period in enumerate(period_types):
-            axs[row_idx][0].annotate(period, xy=(-0.4, 0.5), xycoords='axes fraction',
-                                     fontsize=12, ha='center', va='center', rotation=90)
+                if i == n_rows - 1 and j == 0:
+                    ax.set_ylabel("Δ Crosscorr", fontsize=10)
 
-        # Add column labels (a1-b1 vs a2-b2)
-        for col_idx, (a1, b1, a2, b2) in enumerate(ab_combos):
-            col_label = f"{a1}-{b1}\nvs\n{a2}-{b2}"
-            axs[0][col_idx].set_title(col_label, fontsize=11)
+        # Legend
+        fig.legend(
+            handles=[legend_handles[l] for l in direction_labels if l in legend_handles],
+            labels=[l for l in direction_labels if l in legend_handles],
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.03),
+            ncol=len(direction_labels),
+            fontsize=10
+        )
 
-        m1, m2 = df_pair.iloc[0]["m1"], df_pair.iloc[0]["m2"]
-        dom = df_pair.iloc[0].get("monkey_dominant", "N/A")
-
+        # Title
+        title = f"{monkey_pair}"
         if monkey_pair != "ALL":
-            title = f"{monkey_pair} | m1: {m1}, m2: {m2} | Dominant: {dom}"
-        else:
-            title = "Averaged Across All Pairs"
+            title += f" (m1: {m1[0] if len(m1) else '?'}, m2: {m2[0] if len(m2) else '?'})"
+            if strategy == "by_dominance" and len(monkey_dominant):
+                title += f"\nDominant: {monkey_dominant[0]}"
+            if strategy == "by_leader_follower" and len(monkey_leader):
+                title += f"\nLeader: {monkey_leader[0]}"
+        fig.suptitle(title, fontsize=14)
 
-        fig.suptitle(f"Crosscorr Δ (Observed - Shuffled) [{strategy}] | {title}", fontsize=14)
-
-        # Add legend manually to the right
-        handles = [Line2D([0], [0], color=color, lw=2, label=label)
-                   for label, color in direction_to_color.items()]
-        fig.legend(handles=handles, loc='upper right', bbox_to_anchor=(1.02, 1.0), fontsize=10)
-
-        save_path = strategy_dir / f"{monkey_pair.replace(' ', '_')}.png"
-        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        fig.tight_layout(rect=[0, 0.05, 1, 0.93])
+        save_dir = Path(plot_dir) / strategy
+        save_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{monkey_pair.replace(' ', '_').replace(':', '')}_crosscorr_deltas.png"
+        fig.savefig(save_dir / filename, dpi=300, bbox_inches="tight")
         plt.close(fig)
+
