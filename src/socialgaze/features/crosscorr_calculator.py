@@ -343,19 +343,19 @@ class CrossCorrCalculator:
             self.save_crosscorr_analysis_results(result_df, strategy=strategy)
 
 
-    def _process_crosscorr_pair(self, a1, b1, a2, b2, period_type, session_to_monkey_pair, dominance_lookup):
-        obs_path = self.paths.get_obs_crosscorr_path(a1, b1, a2, b2, period_type)
-        shuffled_path = self.paths.get_shuffled_final_path(a1, b1, a2, b2, period_type)
+    def _process_crosscorr_pair(self, agent1, behavior1, agent2, behavior2, period_type, session_to_monkey_pair, dominance_lookup):
+        obs_path = self.paths.get_obs_crosscorr_path(agent1, behavior1, agent2, behavior2, period_type)
+        shuffled_path = self.paths.get_shuffled_final_path(agent1, behavior1, agent2, behavior2, period_type)
 
         if not obs_path.exists() or not shuffled_path.exists():
-            logger.warning(f"Missing files for {a1}-{b1} vs {a2}-{b2} [{period_type}]")
+            logger.warning(f"Missing files for {agent1}-{behavior1} vs {agent2}-{behavior2} [{period_type}]")
             return []
 
         try:
             observed_df = pd.read_pickle(obs_path)
             shuffled_df = pd.read_pickle(shuffled_path)
         except Exception as e:
-            logger.warning(f"Failed to load data for {a1}-{b1} vs {a2}-{b2}: {e}")
+            logger.warning(f"Failed to load data for {agent1}-{behavior1} vs {agent2}-{behavior2}: {e}")
             return []
 
         rows = []
@@ -383,22 +383,46 @@ class CrossCorrCalculator:
             pos_mask = lags >= 0
             neg_mask = lags <= 0
 
+            # Positive lags (sender: agent1 → receiver: agent2)
             rows.append({
-                "session": session, "run": run, "monkey_pair": monkey_pair, "period_type": period_type,
-                "a1": a1, "b1": b1, "a2": a2, "b2": b2, "m1": m1, "m2": m2,
-                "effective_direction": f"{a1}_{b1} → {a2}_{b2}",
-                "lag_direction": "positive_lags", "lags": lags[pos_mask], "delta": delta[pos_mask],
+                "session": session,
+                "run": run,
+                "monkey_pair": monkey_pair,
+                "period_type": period_type,
+                "sender_agent": agent1,
+                "sender_behavior": behavior1,
+                "receiver_agent": agent2,
+                "receiver_behavior": behavior2,
+                "m1": m1,
+                "m2": m2,
+                "effective_direction": f"{agent1}_{behavior1} → {agent2}_{behavior2}",
+                "lag_direction": "positive_lags",
+                "lags": lags[pos_mask],
+                "delta": delta[pos_mask],
                 "monkey_dominant": dominant
             })
 
+            # Negative lags (flipped: sender: agent2 → receiver: agent1)
             rows.append({
-                "session": session, "run": run, "monkey_pair": monkey_pair, "period_type": period_type,
-                "a1": a1, "b1": b1, "a2": a2, "b2": b2, "m1": m1, "m2": m2,
-                "effective_direction": f"{a2}_{b2} → {a1}_{b1}",
-                "lag_direction": "negative_lags_flipped", "lags": -lags[neg_mask][::-1], "delta": delta[neg_mask][::-1],
+                "session": session,
+                "run": run,
+                "monkey_pair": monkey_pair,
+                "period_type": period_type,
+                "sender_agent": agent2,
+                "sender_behavior": behavior2,
+                "receiver_agent": agent1,
+                "receiver_behavior": behavior1,
+                "m1": m1,
+                "m2": m2,
+                "effective_direction": f"{agent2}_{behavior2} → {agent1}_{behavior1}",
+                "lag_direction": "negative_lags_flipped",
+                "lags": -lags[neg_mask][::-1],
+                "delta": delta[neg_mask][::-1],
                 "monkey_dominant": dominant
             })
+
         return rows
+
 
 
     def save_crosscorr_analysis_results(self, results: pd.DataFrame, strategy: str):
