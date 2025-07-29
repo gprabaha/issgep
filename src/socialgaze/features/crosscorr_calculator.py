@@ -3,37 +3,33 @@
 import pdb
 import logging
 import os
-from typing import Optional, Optional, List, Tuple
-from collections import defaultdict
-
 import random
-import pandas as pd
+from collections import defaultdict
+from itertools import product
+from pathlib import Path
+from typing import Optional, List, Tuple
+
 import numpy as np
-from tqdm import tqdm
-from scipy.signal import fftconvolve
-from scipy.ndimage import gaussian_filter1d
-from scipy.stats import ttest_1samp
+import pandas as pd
 from joblib import Parallel, delayed
-from matplotlib import pyplot as plt
-from matplotlib import cm
+from matplotlib import pyplot as plt, cm
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import fftconvolve
+from scipy.stats import ttest_1samp
+from tqdm import tqdm
 
 from socialgaze.config.crosscorr_config import CrossCorrConfig
 from socialgaze.features.fixation_detector import FixationDetector
 from socialgaze.features.interactivity_detector import InteractivityDetector
-from socialgaze.utils.loading_utils import load_df_from_pkl
-from socialgaze.utils.saving_utils import save_df_to_pkl
 from socialgaze.utils.hpc_utils import (
     generate_crosscorr_job_file,
     submit_dsq_array_job,
     track_job_completion
 )
+from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.utils.path_utils import CrossCorrPaths
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from itertools import product
-import os
+from socialgaze.utils.saving_utils import save_df_to_pkl
+
 
 logger = logging.getLogger(__name__)
 
