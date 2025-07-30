@@ -48,5 +48,36 @@ def main():
     logger.info("Foraging modeling complete.")
 
 
+'''
+
+# Load your data
+# fixation_df should already be loaded as shown in your example
+
+# Basic single model approach
+from semi_markov_model import SemiMarkovModel
+
+model = SemiMarkovModel()
+model.fit(fixation_df, distribution_type='lognorm')
+model.get_model_summary()
+model.plot_transition_matrix()
+model.plot_dwell_distributions()
+
+'''
+
+'''
+# For comparing M1 and M2
+from multi_agent_analysis import MultiAgentSemiMarkovAnalysis
+
+analyzer = MultiAgentSemiMarkovAnalysis()
+analyzer.fit_agent_models(fixation_df, agents=['m1', 'm2'])
+
+# Compare the agents
+analyzer.compare_transition_matrices()
+dwell_stats = analyzer.compare_dwell_times()
+test_results = analyzer.statistical_tests()  # Statistical tests between m1 and m2
+sequence_metrics = analyzer.plot_sequence_metrics(fixation_df)
+
+'''
+
 if __name__ == "__main__":
     main()
