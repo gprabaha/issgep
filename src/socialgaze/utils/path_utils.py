@@ -782,3 +782,36 @@ class CrossCorrPaths:
         date_str = datetime.now().strftime("%Y-%m-%d")
         return Path(self.config.output_dir) / "plots" / "mean_minus_shuffled_crosscorr" / date_str
 
+
+
+###################################
+## Autocorrelation related paths ##
+###################################
+
+
+class AutoCorrPaths:
+    """
+    Centralized path and filename generator for autocorrelation analysis.
+    All file naming conventions and directory logic should be encapsulated here.
+    """
+
+    def __init__(self, config):
+        self.config = config
+
+    def get_output_dir(self) -> Path:
+        return Path(self.config.output_dir) / "autocorr"
+
+    def get_temp_dir(self) -> Path:
+        return self.get_output_dir() / "temp"
+
+    def get_final_filename(self, agent: str, period_type: str) -> str:
+        return f"{agent}__{period_type}.pkl"
+
+    def get_final_path(self, agent: str, period_type: str) -> Path:
+        return self.get_output_dir() / self.get_final_filename(agent, period_type)
+
+    def get_temp_filename(self, session: str, run: int, agent: str, period_type: str) -> str:
+        return f"{agent}__{period_type}__{session}__run{run}.pkl"
+
+    def get_temp_path(self, session: str, run: int, agent: str, period_type: str) -> Path:
+        return self.get_temp_dir() / self.get_temp_filename(session, run, agent, period_type)
