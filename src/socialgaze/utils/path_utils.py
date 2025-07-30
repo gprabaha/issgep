@@ -782,3 +782,17 @@ class CrossCorrPaths:
         date_str = datetime.now().strftime("%Y-%m-%d")
         return Path(self.config.output_dir) / "plots" / "mean_minus_shuffled_crosscorr" / date_str
 
+
+
+###########################
+# Foraging related paths ##
+###########################
+
+class ForagingPaths:
+    def __init__(self, config):
+        self.config = config
+        self.root = config.output_dir / "foraging"
+
+    def get_patch_metrics_path(self, agent: str, behavior: str, period_type: str):
+        fname = f"{agent}_{behavior}_{period_type}_patch_metrics.pkl"
+        return self.root / fname
