@@ -13,6 +13,7 @@ Also:
 - Generates and saves binary vector DataFrames (on disk, not in memory)
 """
 
+import pdb
 import logging
 import argparse
 import random
@@ -74,9 +75,13 @@ def main():
     else:
         logger.info("Skipping ROI label updates...")
 
+    pdb.set_trace()
     # Add categories and save
     logger.info("Adding fixation category column...")
     detector.add_fixation_category_column()
+    logger.info("Adding saccade category column...")
+    detector.add_saccade_category_column()
+    logger.info("Saving updated fixation and saccade dataframes...")
     detector.save_dataframes()
     logger.info("Saved final fixation and saccade dataframes.")
 
