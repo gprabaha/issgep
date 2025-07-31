@@ -8,11 +8,14 @@ from collections import defaultdict
 from pathlib import Path
 import random
 from multiprocessing import Pool
+from joblib import Parallel, delayed
+from tqdm_joblib import tqdm_joblib
 from tqdm import tqdm
 from functools import partial
 import shutil
 import numpy as np
 import pandas as pd
+
 
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.data.gaze_data import GazeData
@@ -25,7 +28,8 @@ from socialgaze.utils.hpc_utils import (
 from socialgaze.utils.path_utils import (
     get_fixation_job_result_path,
     get_saccade_job_result_path,
-    get_behav_binary_vector_path
+    get_behav_binary_vector_path,
+    get_mutual_out_of_roi_fixations_path
 )
 from socialgaze.utils.loading_utils import load_df_from_pkl
 from socialgaze.utils.saving_utils import save_df_to_pkl
@@ -268,93 +272,51 @@ class FixationDetector:
         self.saccades["to_category"] = self.saccades["to"].apply(_categorize_fixations)
 
 
-    def get_mutual_out_of_roi_fixations(self, use_eyes_nf=False, apply_scaling=False) -> pd.DataFrame:
+    def get_mutual_out_of_roi_fixations(self, use_eyes_nf=False, apply_scaling=False, save: bool = True) -> pd.DataFrame:
         """
-        Identify mutual out-of-ROI fixations between m1 and m2.
-        
-        Two fixations (from m1 and m2) are considered mutual if:
-        - Both are labeled as 'out_of_roi'
-        - They overlap in time
-        - Their mean gaze positions are within a spatial threshold (defined as the diagonal of the m1 face ROI)
-        
-        Parameters:
-            use_eyes_nf (bool): If True, use 'eyes_nf' ROI for alignment instead of 'face'. Default is False.
-            apply_scaling (bool): If True, scale m2 coordinates to match m1 ROI size. Default is False.
-        
-        Returns:
-            pd.DataFrame: Each row corresponds to a mutual fixation event with m1 and m2 data.
+        Parallel version using joblib: Identify mutual out-of-ROI fixations between m1 and m2.
+        Stores results in `self.mutual_out_of_roi_fixations`, optionally saves to disk.
         """
-        logger.info("Extracting mutual out-of-ROI fixations...")
-        
+        logger.info("Extracting mutual out-of-ROI fixations (parallel via joblib)...")
+
         if self.fixations is None or self.fixations.empty:
-            logger.info("Fixation dataframe not loaded yet. Attempting to load from disk.")
             self.load_dataframes("fixations")
-
         if "category" not in self.fixations.columns:
-            logger.info("Fixation categories not found. Running add_fixation_category_column().")
             self.add_fixation_category_column()
-
         self.gaze_data.load_dataframes(["positions", "roi_vertices"])
 
-        mutual_fixations = []
+        # Prepare tasks
+        run_groups = self.fixations.groupby(["session_name", "run_number"])
+        tasks = list(run_groups.groups.keys())
 
-        for (session, run), fix_group in tqdm(
-                self.fixations.groupby(["session_name", "run_number"]),
-                desc="Mutual out of ROI fixation detection",
-                total=len(self.fixations.groupby(["session_name", "run_number"]))
-            ):
+        func = partial(
+            _process_run_for_mutual_fixations,
+            fixations=self.fixations,
+            gaze_data=self.gaze_data,
+            use_eyes_nf=use_eyes_nf,
+            apply_scaling=apply_scaling
+        )
 
-            fxs_m1 = fix_group[(fix_group["agent"] == "m1") & (fix_group["category"] == "out_of_roi")]
-            fxs_m2 = fix_group[(fix_group["agent"] == "m2") & (fix_group["category"] == "out_of_roi")]
-            if fxs_m1.empty or fxs_m2.empty:
-                continue
+        logger.info(f"Running in parallel with {self.config.num_cpus} workers")
 
-            pos_m1 = self.gaze_data.get_data("positions", session, run, "m1")
-            pos_m2 = self.gaze_data.get_data("positions", session, run, "m2")
-            roi_df = self.gaze_data.get_data("roi_vertices", session, run)
-            if pos_m1 is None or pos_m2 is None or roi_df is None:
-                continue
+        # Use joblib with tqdm progress bar
+        with tqdm_joblib(tqdm(desc="Mutual fixation detection", total=len(tasks))):
+            results = Parallel(n_jobs=self.config.num_cpus)(
+                delayed(func)(key) for key in tasks
+            )
 
-            x1 = np.array(pos_m1.iloc[0]["x"])
-            y1 = np.array(pos_m1.iloc[0]["y"])
-            x2 = np.array(pos_m2.iloc[0]["x"])
-            y2 = np.array(pos_m2.iloc[0]["y"])
+        # Flatten and store
+        all_rows = [row for sublist in results for row in sublist]
+        self.mutual_out_of_roi_fixations = pd.DataFrame(all_rows)
 
-            roi1 = _get_plane_aligning_roi_bounds(roi_df, agent="m1", use_eyes_nf=use_eyes_nf)
-            roi2 = _get_plane_aligning_roi_bounds(roi_df, agent="m2", use_eyes_nf=use_eyes_nf)
-            if roi1 is None or roi2 is None:
-                continue
-
-            transform_func = _get_transform_to_m1_space(roi1, roi2, apply_scaling)
-            spatial_thresh = _get_roi_diagonal(roi1)
-
-            for _, row1 in fxs_m1.iterrows():
-                for _, row2 in fxs_m2.iterrows():
-                    if not _check_temporal_overlap(row1, row2):
-                        continue
-
-                    mean1 = np.array([np.mean(x1[row1["start"]:row1["stop"] + 1]),
-                                    np.mean(y1[row1["start"]:row1["stop"] + 1])])
-                    mean2 = np.array([np.mean(x2[row2["start"]:row2["stop"] + 1]),
-                                    np.mean(y2[row2["start"]:row2["stop"] + 1])])
-                    mean2_m1 = transform_func(mean2)
-
-                    dist = np.linalg.norm(mean1 - mean2_m1)
-
-                    if dist < spatial_thresh:
-                        mutual_fixations.append(dict(
-                            session_name=session,
-                            run_number=run,
-                            m1_start=row1["start"], m1_stop=row1["stop"],
-                            m2_start=row2["start"], m2_stop=row2["stop"],
-                            m1_mean_x=mean1[0], m1_mean_y=mean1[1],
-                            m2_mean_x_m1space=mean2_m1[0], m2_mean_y_m1space=mean2_m1[1],
-                            spatial_distance=dist
-                        ))
-        
-        self.mutual_out_of_roi_fixations = pd.DataFrame(mutual_fixations)
+        if save:
+            out_path = get_mutual_out_of_roi_fixations_path(self.processed_data_dir)
+            self.mutual_out_of_roi_fixations.to_pickle(out_path)
+            logger.info(f"Saved mutual out-of-ROI fixations to: {out_path}")
 
         return self.mutual_out_of_roi_fixations
+
+
 
 
     def generate_and_save_binary_vectors(
@@ -744,6 +706,62 @@ def _categorize_fixations(location: List[str]) -> str:
 ######################################
 # Mutual out of roi fixation helpers #
 ######################################
+
+
+def _process_run_for_mutual_fixations(key, fixations, gaze_data, use_eyes_nf, apply_scaling):
+    session, run = key
+    rows = []
+
+    fix_group = fixations[(fixations["session_name"] == session) & (fixations["run_number"] == run)]
+    fxs_m1 = fix_group[(fix_group["agent"] == "m1") & (fix_group["category"] == "out_of_roi")]
+    fxs_m2 = fix_group[(fix_group["agent"] == "m2") & (fix_group["category"] == "out_of_roi")]
+    if fxs_m1.empty or fxs_m2.empty:
+        return []
+
+    pos_m1 = gaze_data.get_data("positions", session, run, "m1")
+    pos_m2 = gaze_data.get_data("positions", session, run, "m2")
+    roi_df = gaze_data.get_data("roi_vertices", session, run)
+    if pos_m1 is None or pos_m2 is None or roi_df is None:
+        return []
+
+    x1 = np.array(pos_m1.iloc[0]["x"])
+    y1 = np.array(pos_m1.iloc[0]["y"])
+    x2 = np.array(pos_m2.iloc[0]["x"])
+    y2 = np.array(pos_m2.iloc[0]["y"])
+
+    roi1 = _get_plane_aligning_roi_bounds(roi_df, agent="m1", use_eyes_nf=use_eyes_nf)
+    roi2 = _get_plane_aligning_roi_bounds(roi_df, agent="m2", use_eyes_nf=use_eyes_nf)
+    if roi1 is None or roi2 is None:
+        return []
+
+    transform_func = _get_transform_to_m1_space(roi1, roi2, apply_scaling)
+    spatial_thresh = _get_roi_diagonal(roi1)
+
+    for _, row1 in fxs_m1.iterrows():
+        for _, row2 in fxs_m2.iterrows():
+            if not _check_temporal_overlap(row1, row2):
+                continue
+
+            mean1 = np.array([np.mean(x1[row1["start"]:row1["stop"] + 1]),
+                              np.mean(y1[row1["start"]:row1["stop"] + 1])])
+            mean2 = np.array([np.mean(x2[row2["start"]:row2["stop"] + 1]),
+                              np.mean(y2[row2["start"]:row2["stop"] + 1])])
+            mean2_m1 = transform_func(mean2)
+
+            dist = np.linalg.norm(mean1 - mean2_m1)
+
+            if dist < spatial_thresh:
+                rows.append(dict(
+                    session_name=session,
+                    run_number=run,
+                    m1_start=row1["start"], m1_stop=row1["stop"],
+                    m2_start=row2["start"], m2_stop=row2["stop"],
+                    m1_mean_x=mean1[0], m1_mean_y=mean1[1],
+                    m2_mean_x_m1space=mean2_m1[0], m2_mean_y_m1space=mean2_m1[1],
+                    spatial_distance=dist
+                ))
+    return rows
+
 
 def _get_plane_aligning_roi_bounds(roi_df: pd.DataFrame, agent: str, use_eyes_nf: bool) -> dict:
     roi_name = "eyes_nf" if use_eyes_nf else "face"

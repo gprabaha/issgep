@@ -255,6 +255,15 @@ def get_behav_binary_vector_path(config, behavior_type: str) -> Path:
     return binary_vec_dir / filename
 
 
+def get_mutual_out_of_roi_fixations_path(processed_data_dir: Path) -> Path:
+    """
+    Returns the path to the mutual out-of-ROI fixations dataframe.
+    """
+    processed_data_dir = Path(processed_data_dir)
+    processed_data_dir.mkdir(parents=True, exist_ok=True)
+    return processed_data_dir / "mutual_out_of_roi_fixations.pkl"
+
+
 # == Interactivity paths ==
 
 def get_mutual_fixation_density_path(config, fixation_type='face') -> Path:
