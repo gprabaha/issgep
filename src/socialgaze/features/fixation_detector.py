@@ -38,7 +38,9 @@ class FixationDetector:
         self.config = config
         self.fixations: Optional[pd.DataFrame] = None
         self.saccades: Optional[pd.DataFrame] = None
+        self.mutual_out_of_roi_fixations: Optional[pd.DataFrame] = None
         self.binary_vector_paths: dict = {}
+
 
     def detect_fixations_through_hpc_jobs(self):
         logger.info("\n ** Generating fixation and saccade detection jobs...")
@@ -296,7 +298,12 @@ class FixationDetector:
 
         mutual_fixations = []
 
-        for (session, run), fix_group in self.fixations.groupby(["session_name", "run_number"]):
+        for (session, run), fix_group in tqdm(
+                self.fixations.groupby(["session_name", "run_number"]),
+                desc="Mutual out of ROI fixation detection",
+                total=len(self.fixations.groupby(["session_name", "run_number"]))
+            ):
+
             fxs_m1 = fix_group[(fix_group["agent"] == "m1") & (fix_group["category"] == "out_of_roi")]
             fxs_m2 = fix_group[(fix_group["agent"] == "m2") & (fix_group["category"] == "out_of_roi")]
             if fxs_m1.empty or fxs_m2.empty:
@@ -313,12 +320,12 @@ class FixationDetector:
             x2 = np.array(pos_m2.iloc[0]["x"])
             y2 = np.array(pos_m2.iloc[0]["y"])
 
-            roi1 = _get_single_roi_bounds(roi_df, agent="m1", use_eyes_nf=use_eyes_nf)
-            roi2 = _get_single_roi_bounds(roi_df, agent="m2", use_eyes_nf=use_eyes_nf)
+            roi1 = _get_plane_aligning_roi_bounds(roi_df, agent="m1", use_eyes_nf=use_eyes_nf)
+            roi2 = _get_plane_aligning_roi_bounds(roi_df, agent="m2", use_eyes_nf=use_eyes_nf)
             if roi1 is None or roi2 is None:
                 continue
 
-            transform = _get_transform_to_m1_space(roi1, roi2, apply_scaling)
+            transform_func = _get_transform_to_m1_space(roi1, roi2, apply_scaling)
             spatial_thresh = _get_roi_diagonal(roi1)
 
             for _, row1 in fxs_m1.iterrows():
@@ -330,7 +337,7 @@ class FixationDetector:
                                     np.mean(y1[row1["start"]:row1["stop"] + 1])])
                     mean2 = np.array([np.mean(x2[row2["start"]:row2["stop"] + 1]),
                                     np.mean(y2[row2["start"]:row2["stop"] + 1])])
-                    mean2_m1 = transform(mean2)
+                    mean2_m1 = transform_func(mean2)
 
                     dist = np.linalg.norm(mean1 - mean2_m1)
 
@@ -344,9 +351,10 @@ class FixationDetector:
                             m2_mean_x_m1space=mean2_m1[0], m2_mean_y_m1space=mean2_m1[1],
                             spatial_distance=dist
                         ))
+        
+        self.mutual_out_of_roi_fixations = pd.DataFrame(mutual_fixations)
 
-        return pd.DataFrame(mutual_fixations)
-
+        return self.mutual_out_of_roi_fixations
 
 
     def generate_and_save_binary_vectors(
@@ -732,11 +740,12 @@ def _categorize_fixations(location: List[str]) -> str:
     else:
         return "out_of_roi"
 
+
 ######################################
 # Mutual out of roi fixation helpers #
 ######################################
 
-def _get_single_roi_bounds(roi_df: pd.DataFrame, agent: str, use_eyes_nf: bool) -> dict:
+def _get_plane_aligning_roi_bounds(roi_df: pd.DataFrame, agent: str, use_eyes_nf: bool) -> dict:
     roi_name = "eyes_nf" if use_eyes_nf else "face"
     subset = roi_df[(roi_df["agent"] == agent) & (roi_df["roi_name"] == roi_name)]
     if subset.empty:
@@ -747,11 +756,13 @@ def _get_single_roi_bounds(roi_df: pd.DataFrame, agent: str, use_eyes_nf: bool) 
         "y_min": row["y_min"], "y_max": row["y_max"]
     }
 
+
 def _get_roi_center(roi: dict) -> np.ndarray:
     return np.array([
         (roi["x_min"] + roi["x_max"]) / 2,
         (roi["y_min"] + roi["y_max"]) / 2
     ])
+
 
 def _get_roi_diagonal(roi: dict) -> float:
     return np.linalg.norm([
@@ -759,21 +770,24 @@ def _get_roi_diagonal(roi: dict) -> float:
         roi["y_max"] - roi["y_min"]
     ])
 
+
 def _get_transform_to_m1_space(roi1: dict, roi2: dict, scale: bool = False):
     center1 = _get_roi_center(roi1)
     center2 = _get_roi_center(roi2)
 
     def _transform(pt: np.ndarray) -> np.ndarray:
-        flipped = np.array([-pt[0], pt[1]])
-        aligned = flipped + (center1 - (-center2))
-        if not scale:
-            return aligned
+        pt_rel = pt - center2
+        pt_flipped = np.array([-pt_rel[0], pt_rel[1]])
 
-        scale_x = (roi1["x_max"] - roi1["x_min"]) / (roi2["x_max"] - roi2["x_min"])
-        scale_y = (roi1["y_max"] - roi1["y_min"]) / (roi2["y_max"] - roi2["y_min"])
-        return center1 + (aligned - center1) * np.array([scale_x, scale_y])
+        if scale:
+            scale_x = (roi1["x_max"] - roi1["x_min"]) / (roi2["x_max"] - roi2["x_min"])
+            scale_y = (roi1["y_max"] - roi1["y_min"]) / (roi2["y_max"] - roi2["y_min"])
+            pt_flipped = pt_flipped * np.array([scale_x, scale_y])
+
+        return pt_flipped + center1
 
     return _transform
+
 
 def _check_temporal_overlap(row1: pd.Series, row2: pd.Series) -> bool:
     return not (row1["stop"] < row2["start"] or row2["stop"] < row1["start"])

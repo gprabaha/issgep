@@ -75,13 +75,15 @@ def main():
     else:
         logger.info("Skipping ROI label updates...")
 
-    pdb.set_trace()
     # Add categories and save
     logger.info("Adding fixation category column...")
     detector.add_fixation_category_column()
     logger.info("Adding saccade category column...")
-    detector.add_saccade_category_column()
-    logger.info("Saving updated fixation and saccade dataframes...")
+    detector.add_saccade_category_columns()
+    logger.info("Get mutual out_of_roi fixations...")
+    df = detector.get_mutual_out_of_roi_fixations()
+    pdb.set_trace()
+
     detector.save_dataframes()
     logger.info("Saved final fixation and saccade dataframes.")
 
