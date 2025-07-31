@@ -80,16 +80,16 @@ def main():
     detector.add_fixation_category_column()
     logger.info("Adding saccade category column...")
     detector.add_saccade_category_columns()
-    logger.info("Get mutual out_of_roi fixations...")
-    df = detector.get_mutual_out_of_roi_fixations()
-    pdb.set_trace()
-
     detector.save_dataframes()
     logger.info("Saved final fixation and saccade dataframes.")
+    logger.info("Get mutual out_of_roi fixations...")
+    df = detector.get_mutual_out_of_roi_fixations()
+    logger.info("Mutual out_of_roi fixations DataFrame head:")
+    logger.info(df.head(25))
 
     # Generate binary vectors (on-disk only)
-    logger.info("Generating and saving all binary vector dataframes...")
-    detector.generate_and_save_binary_vectors()
+    # logger.info("Generating and saving all binary vector dataframes...")
+    # detector.generate_and_save_binary_vectors()
 
     # Safely log summary info
     logger.info("Fixations df head:")
