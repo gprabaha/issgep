@@ -35,18 +35,14 @@ def main():
 
     # Initialize plotter (inherits from FixationDetector, uses same data/config)
     fixation_plotter = FixationPlotter(gaze_data=gaze_data, config=fixation_config)
-
-    # === PREVIEW RANDOM RUNS (no saving) ===
-    fixation_plotter.plot_face_fixation_timelines(n_samples=5, seed=None)
-
     # === EXPORT SINGLE RUN PDFs ===
     fixation_plotter.plot_face_fixation_timelines(
         export_pdf_for=("02062018", 8)
     )
-
     fixation_plotter.plot_face_fixation_timelines(
         export_pdf_for=("09042018", 3)
     )
+
 
 if __name__ == "__main__":
     main()

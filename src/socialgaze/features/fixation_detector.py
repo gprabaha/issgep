@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
@@ -665,55 +666,43 @@ def _categorize_fixations(location: List[str]) -> str:
 @dataclass
 class FaceFixPlotStyle:
     bin_size_seconds: float = 0.001
-    a: float = 1.0                  # vertical unit
+    a: float = 1.0
     bar_height: float = 0.28
-    colors: Dict[str, str] = None   # keys: "m1", "m2", "both"
+    colors: Dict[str, str] = None
     per_run_width: float = 4.0
     per_run_height: float = 1.6
     tight_layout: bool = True
-    max_cols: int = 5               # default grid width for previews
+    max_cols: int = 5
+
+    # NEW:
+    export_format: str = "pdf"     # "pdf" or "svg"
+    font_family: str = "Arial"     # a font Illustrator has
 
     def __post_init__(self):
         if self.colors is None:
             self.colors = {"m1": "#1f77b4", "m2": "#2ca02c", "both": "#d62728"}
 
 
+
 # ==================================
 # Plotter that inherits the detector
 # ==================================
 class FixationPlotter(FixationDetector):
-    """
-    Plot-only subclass of FixationDetector.
-    Uses existing paths/configs from the detector but does NOT run detection.
-    """
-
     def plot_face_fixation_timelines(
         self,
         n_samples: int = 5,
         seed: int | None = None,
-        export_pdf_for: Tuple[str, int] | None = None,   # (session_name, run_number)
+        export_pdf_for: Tuple[str, int] | None = None,
         export_dir: Path | None = None,
         style: FaceFixPlotStyle | None = None,
     ) -> None:
-        """
-        Preview a grid of runs (one axes per run with 3 bands at y=3a (m1), 2a (m2), a (m1&m2)),
-        OR export a single run as a vector PDF.
-          - If `export_pdf_for` is provided, no preview is shown—only that run is exported.
-          - Otherwise previews `n_samples` random runs (no saving).
-
-        Assumes a face-fixation binary vector DF with columns:
-          session_name, run_number, agent in {'m1','m2'}, binary_vector.
-        Optionally uses gaze_data.run_lengths_df['length'] to cap timeline length.
-        """
         style = style or FaceFixPlotStyle()
 
-        # Load once
         face_df = self.get_binary_vector_df("face_fixation")
         for col in ("session_name", "run_number", "agent", "binary_vector"):
             if col not in face_df.columns:
                 raise KeyError(f"Required column '{col}' missing in face_df.")
 
-        # Optional run lengths
         run_lengths_df = None
         try:
             self.gaze_data.load_dataframes(["run_lengths"])
@@ -721,10 +710,8 @@ class FixationPlotter(FixationDetector):
         except Exception:
             pass
 
-        # Build lookup {(session, run): {'m1': vec, 'm2': vec}}
         recs = _collect_face_vectors(face_df)
 
-        # Default export directory
         if export_dir is None:
             export_dir = (self.config.output_dir / "plots" / "fixation_timelines" /
                           datetime.now().strftime("%Y-%m-%d"))
@@ -740,14 +727,18 @@ class FixationPlotter(FixationDetector):
                 run_lengths_df=run_lengths_df,
                 bin_size_seconds=style.bin_size_seconds,
             )
-            out_path = export_dir / f"{session}__run{run}__face_fixation_timelines.pdf"
-            _export_single_run(
+
+            # build path WITHOUT forcing an extension here; helper sets it
+            base = export_dir / f"{session}__run{run}__face_fixation_timelines"
+            out_path = _export_single_run(
                 segs_m1, segs_m2, segs_both, total_time_sec,
                 session=session, run=int(run),
-                out_path=out_path,
+                out_basepath=base,
                 style=style,
+                export_format=style.export_format,
+                font_family=style.font_family,
             )
-            logger.info(f"Saved PDF: {out_path}")
+            logger.info(f"Saved {style.export_format.upper()}: {out_path}")
             return
 
         # ---- PREVIEW GRID MODE ----
@@ -770,6 +761,7 @@ class FixationPlotter(FixationDetector):
         if style.tight_layout:
             plt.tight_layout()
         plt.show()
+
 
 
 # =========================
@@ -868,6 +860,8 @@ def _draw_three_band_panel_editable(ax, segs_m1, segs_m2, segs_both, total_time_
             if w <= 0:
                 continue
             rect = mpatches.Rectangle((x, y0), width=w, height=bh, facecolor=color, edgecolor="none")
+            rect.set_clip_on(False)
+            rect.set_clip_path(None)
             ax.add_patch(rect)
 
     _add_rects(segs_m1,   3 * a, style.colors["m1"])
@@ -928,25 +922,69 @@ def _make_preview_grid(
 def _export_single_run(
     segs_m1, segs_m2, segs_both, total_time_sec,
     session: str, run: int,
-    out_path: Path,
+    out_basepath: Path,
     style: FaceFixPlotStyle,
-):
-    """Write a single-run vector PDF with individually selectable bars."""
-    f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height))
+    export_format: str = "pdf",
+    font_family: str = "Arial",
+) -> Path:
+    rc = {
+        "font.family": "sans-serif",
+        "font.sans-serif": [font_family],
+        "text.usetex": False,
 
-    # Use the EDITABLE drawer for export
-    _draw_three_band_panel_editable(
-        ax=ax,
-        segs_m1=segs_m1, segs_m2=segs_m2, segs_both=segs_both,
-        total_time_sec=total_time_sec,
-        style=style,
-        title=f"{session} • run {run}",
-    )
+        # Keep text as text (not shapes)
+        "pdf.fonttype": 42,       # TrueType; Illustrator keeps text editable
+        "ps.fonttype": 42,
+        "svg.fonttype": "none",   # keep text as <text> in SVG
 
-    if style.tight_layout:
-        f.tight_layout()
-    f.savefig(out_path, format="pdf", dpi=300, transparent=True, metadata={
-        "Title": f"{session} run {run} face fixation timelines",
-        "Subject": "Face-fixation timelines for m1, m2, and overlap",
-    })
-    plt.close(f)
+        # Export/figure settings
+        "savefig.transparent": True,
+        "savefig.bbox": None,
+        "savefig.pad_inches": 0.01,
+        "path.simplify": False,
+    }
+
+    out_path = out_basepath.with_suffix("." + export_format.lower())
+
+    with mpl.rc_context(rc):
+        f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height))
+
+        # No axes background that could become a clipping mask
+        ax.patch.set_visible(False)
+        f.patch.set_alpha(0.0)
+        ax.set_facecolor("none")
+
+        # draw per-rect bars (no clipping)
+        a, bh = style.a, style.bar_height
+        def _add_rects(segs, y_center, color):
+            y0 = y_center - bh / 2.0
+            for (x, w) in segs:
+                if w <= 0:
+                    continue
+                rect = mpatches.Rectangle((x, y0), w, bh, facecolor=color, edgecolor="none", linewidth=0)
+                rect.set_clip_on(False)
+                rect.set_clip_path(None)
+                rect.set_rasterized(False)
+                ax.add_patch(rect)
+
+        _add_rects(segs_m1,   3 * a, style.colors["m1"])
+        _add_rects(segs_m2,   2 * a, style.colors["m2"])
+        _add_rects(segs_both, 1 * a, style.colors["both"])
+
+        ax.set_xlim(0, total_time_sec)
+        ax.set_ylim(0, 4 * a)
+        ax.set_yticks([a, 2 * a, 3 * a])
+        ax.set_yticklabels(["m1 & m2", "m2", "m1"])
+        ax.set_xlabel("Time (s)")
+        ax.set_title(f"{session} • run {run}", fontsize=10)
+        ax.grid(False)
+
+        # Avoid tight_layout on export; can reintroduce clips
+        f.savefig(out_path, format=export_format, dpi=300, transparent=True, metadata={
+            "Title": f"{session} run {run} face fixation timelines",
+            "Subject": "Face-fixation timelines for m1, m2, and overlap",
+        })
+        plt.close(f)
+
+    return out_path
+
