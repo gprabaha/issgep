@@ -253,6 +253,307 @@ class FixProbDetector:
         return result
 
 
+
+import os
+import logging
+from typing import Iterable, Literal, Tuple, Optional, Dict
+import pandas as pd
+import seaborn as sns
+import matplotlib
+import matplotlib.pyplot as plt
+from scipy.stats import ks_2samp
+from scipy.stats.mstats import winsorize
+
+
+
+class FixProbPlotter(FixProbDetector):
+    """
+    Plotter for fixation probability summaries (joint vs marginal).
+    Inherits data access from FixProbDetector.
+
+    Default context: "overall".
+    """
+
+    def __init__(self, fixation_detector, config, interactivity_detector=None):
+        super().__init__(
+            fixation_detector=fixation_detector,
+            config=config,
+            interactivity_detector=interactivity_detector
+        )
+        # Headless-safe backend for HPC
+        matplotlib.use("Agg", force=True)
+
+    # ------------- Public API ------------- #
+    def plot_joint_vs_marginal_violin(
+        self,
+        context: Literal["overall", "interactivity", "segments"] = "overall",
+        categories: Iterable[str] = ("face", "out_of_roi"),
+        export_dir: Optional[str] = None,
+        filename: Optional[str] = None,
+        export_formats: Tuple[str, ...] = ("pdf",),  # add "svg" if you want SVG too
+        illustrator_friendly: bool = True,
+        return_fig: bool = False,
+    ):
+        """
+        Make Illustrator-friendly violin plots comparing P(m1&m2) vs P(m1)*P(m2).
+
+        Parameters
+        ----------
+        context : {"overall","interactivity","segments"}
+            "overall" (default) for one-row summary; others split by interactivity.
+        categories : iterable of {"face","out_of_roi", ...}
+        export_dir : path to save; defaults to config.plot_dir / "fix_prob"
+        filename : custom base filename; sensible defaults are chosen per context
+        export_formats : ("pdf",) or ("pdf","svg")
+        illustrator_friendly : keep live text and vectors
+        return_fig : if True, returns (fig, axes) instead of closing
+        """
+        df = self.get_data(context)  # uses the detector’s API
+        df = df[df["fixation_category"].isin(categories)].copy()
+        
+        # Alias columns used downstream
+        df["joint"] = df["P(m1&m2)"]
+        df["marginal"] = df["P(m1)*P(m2)"]
+
+        # Palettes
+        violin_palette = getattr(self.config, "violin_palette", {"P(m1)*P(m2)": "#8da0cb", "P(m1&m2)": "#fc8d62"})
+        monkey_pairs = df["monkey_pair"].unique()
+        monkey_color_dict = self._get_monkey_palette(monkey_pairs)
+
+        # Figure layouts
+        if context == "overall":
+            fig, axes = plt.subplots(1, len(categories), figsize=(12, 6), sharey=False)
+            axes = axes.ravel().tolist()
+            axes = axes if isinstance(axes, (list, tuple, pd.Series)) else [axes]
+            for i, category in enumerate(categories):
+                ax = axes[i]
+                sub_df = df[df["fixation_category"] == category].copy()
+                self._plot_violin_core(ax, sub_df, monkey_color_dict, violin_palette)
+                ax.set_title(f"{category.capitalize()}")
+            fig.suptitle("Fixation Probability Comparison — Overall", fontsize=16)
+            default_name = "joint_fixation_probabilities_overall"
+
+        elif context in {"interactivity", "segments"}:
+            fig, axs = plt.subplots(2, len(categories), figsize=(12, 10), sharey=False)
+            interactivities = ["interactive", "non_interactive"]
+            for i, interactivity in enumerate(interactivities):
+                for j, category in enumerate(categories):
+                    ax = axs[i, j]
+                    sub_df = df[
+                        (df["interactivity"] == interactivity) &
+                        (df["fixation_category"] == category)
+                    ].copy()
+                    self._plot_violin_core(ax, sub_df, monkey_color_dict, violin_palette)
+                    ax.set_title(f"{interactivity.capitalize()} — {category}")
+            title = "By Interactivity Segment" if context == "segments" else "By Interactivity"
+            fig.suptitle(f"Fixation Probability Comparison — {title}", fontsize=16)
+            default_name = f"joint_fixation_probabilities_by_{context}"
+
+        else:
+            raise ValueError(f"Invalid context: {context}")
+
+        # Layout + export
+        plt.tight_layout(rect=[0, 0, 1, 0.93])
+
+        if illustrator_friendly:
+            self._set_illustrator_friendly_rcparams()
+
+        out_dir = export_dir or self.config.plot_dir
+        os.makedirs(out_dir, exist_ok=True)
+
+        base = filename or default_name
+        self._finalize_and_save(fig, out_dir, base, export_formats)
+
+        if return_fig:
+            return fig, fig.get_axes()
+        plt.close(fig)
+
+    # ------------- Internals ------------- #
+    def _plot_violin_core(
+        self,
+        ax: matplotlib.axes.Axes,
+        full_df: pd.DataFrame,
+        monkey_color_dict: Dict,
+        violin_palette: Dict[str, str]
+    ):
+        """One violin panel with winsorization + per-pair medians and KS test."""
+        if full_df.empty:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            return
+
+        melted = full_df.melt(
+            id_vars=["monkey_pair"],
+            value_vars=["P(m1)*P(m2)", "P(m1&m2)"],
+            var_name="Probability Type",
+            value_name="Probability"
+        )
+
+        # Winsorize within each probability type (robust outlier handling)
+        melted["Probability"] = (
+            melted
+            .groupby("Probability Type", group_keys=False)["Probability"]
+            .apply(lambda x: pd.Series(winsorize(x, limits=[0.05, 0.05]), index=x.index))
+        )
+
+        sns.violinplot(
+            data=melted,
+            x="Probability Type",
+            y="Probability",
+            hue="Probability Type",
+            palette=violin_palette,
+            inner="quartile",
+            order=["P(m1)*P(m2)", "P(m1&m2)"],
+            legend=False,
+            ax=ax
+        )
+
+        # Overlay per-monkey-pair medians (two points + a faint connector)
+        mp_medians = self._get_monkey_pair_medians(full_df)
+        self._overlay_medians(ax, mp_medians, monkey_color_dict)
+
+        # KS annotation
+        self._annotate_ks(ax, full_df)
+
+        # Cosmetics
+        ax.set_xlabel("")
+        ax.set_ylabel("Probability")
+
+    @staticmethod
+    def _get_monkey_palette(monkey_pairs):
+        palette = sns.color_palette("Set2", n_colors=len(monkey_pairs))
+        return {mp: palette[i] for i, mp in enumerate(monkey_pairs)}
+
+    @staticmethod
+    def _get_monkey_pair_medians(full_df: pd.DataFrame) -> dict:
+        cols = ["P(m1)*P(m2)", "P(m1&m2)"]
+        agg_df = full_df.groupby("monkey_pair")[cols].median().reset_index()
+        return {row["monkey_pair"]: [row[cols[0]], row[cols[1]]] for _, row in agg_df.iterrows()}
+
+    @staticmethod
+    def _overlay_medians(ax, monkey_pair_data, monkey_color_dict):
+        for mp, y_vals in monkey_pair_data.items():
+            if not isinstance(y_vals, list) or len(y_vals) != 2:
+                logger.warning(f"Invalid y_vals for {mp}: {y_vals}")
+                continue
+            jitter = 0.01 * (hash(mp) % 10 - 5)
+            x0, x1 = 0 + jitter, 1 + jitter
+            color = monkey_color_dict.get(mp, "gray")
+            ax.plot([x0, x1], y_vals, color=color, alpha=0.4, linewidth=1.25)
+            ax.scatter([x0], [y_vals[0]], color=color, s=30, alpha=0.8)
+            ax.scatter([x1], [y_vals[1]], color=color, s=30, alpha=0.8)
+
+    @staticmethod
+    def _annotate_ks(ax, group_df: pd.DataFrame):
+        try:
+            ks_stat, p_val = ks_2samp(group_df["P(m1)*P(m2)"], group_df["P(m1&m2)"])
+        except Exception as e:
+            logger.warning(f"KS test failed: {e}")
+            ax.text(0.5, 1.05, "KS test: N/A", transform=ax.transAxes, ha="center", fontsize=12)
+            return
+
+        marker = FixProbPlotter._get_significance_marker(p_val)
+        # Put the marker above the axes (kept as text for Illustrator)
+        ax.text(0.5, 1.05, f"KS test: {marker}", transform=ax.transAxes, ha="center", fontsize=12)
+
+    @staticmethod
+    def _get_significance_marker(p_val: float) -> str:
+        if p_val < 1e-3:
+            return f'***; p = {p_val:.2e}'
+        elif p_val < 1e-2:
+            return f'**; p = {p_val:.2e}'
+        elif p_val < 5e-2:
+            return f'*; p = {p_val:.3f}'
+        else:
+            return f'NS; p = {p_val:.3f}'
+
+    @staticmethod
+    def _set_illustrator_friendly_rcparams():
+        """
+        Keep text as text, embed TrueType fonts, avoid path-outlining,
+        and keep transparency for clean editing in Illustrator.
+        """
+        # PDF: embed TrueType fonts
+        matplotlib.rcParams["pdf.fonttype"] = 42
+        # PS (in case): embed TrueType fonts
+        matplotlib.rcParams["ps.fonttype"] = 42
+        # SVG: keep text as text (not paths)
+        matplotlib.rcParams["svg.fonttype"] = "none"
+        # No global facecolor fills; export will set transparent=True
+
+    @staticmethod
+    def _finalize_and_save(fig, save_dir: str, base_filename: str, formats: Tuple[str, ...]):
+        fig.patch.set_alpha(0)
+        for ax in fig.get_axes():
+            ax.set_facecolor("none")
+
+        for fmt in formats:
+            path = os.path.join(save_dir, f"{base_filename}.{fmt.lower()}")
+            try:
+                fig.savefig(
+                    path,
+                    format=fmt,
+                    transparent=True,
+                    bbox_inches="tight",
+                    dpi=300 if fmt.lower() in ("png",) else None,
+                    metadata={"Creator": "socialgaze FixProbPlotter"}
+                )
+                logger.info(f"Saved: {path}")
+            except Exception as e:
+                logger.error(f"Failed to save {path}: {e}")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 import numpy as np
 from statsmodels.tsa.stattools import acf
 from scipy.stats import norm
