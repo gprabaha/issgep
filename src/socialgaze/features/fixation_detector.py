@@ -1,18 +1,25 @@
 # src/socialgaze/features/fixation_detector.py
 
-import pdb
+from __future__ import annotations
 
 import logging
-from typing import List, Tuple, Optional, Union
-from collections import defaultdict
-from pathlib import Path
+import math
+import pdb
 import random
-from multiprocessing import Pool
-from tqdm import tqdm
-from functools import partial
 import shutil
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+from functools import partial
+from multiprocessing import Pool
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.data.gaze_data import GazeData
@@ -20,17 +27,18 @@ from socialgaze.utils.fixation_utils import detect_fixations_and_saccades
 from socialgaze.utils.hpc_utils import (
     generate_fixation_job_file,
     submit_dsq_array_job,
-    track_job_completion
-)
-from socialgaze.utils.path_utils import (
-    get_fixation_job_result_path,
-    get_saccade_job_result_path,
-    get_behav_binary_vector_path
+    track_job_completion,
 )
 from socialgaze.utils.loading_utils import load_df_from_pkl
+from socialgaze.utils.path_utils import (
+    get_behav_binary_vector_path,
+    get_fixation_job_result_path,
+    get_saccade_job_result_path,
+)
 from socialgaze.utils.saving_utils import save_df_to_pkl
 
 logger = logging.getLogger(__name__)
+
 
 class FixationDetector:
     def __init__(self, gaze_data: GazeData, config: FixationConfig):
@@ -649,20 +657,7 @@ def _categorize_fixations(location: List[str]) -> str:
 
 
 
-## FOR PLOTTING ##
 
-from __future__ import annotations
-import math
-import random
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, Tuple, List
-
-import numpy as np
-import matplotlib.pyplot as plt
-import logging
-logger = logging.getLogger(__name__)
 
 # =========================
 # Style / config for plots
@@ -843,13 +838,13 @@ def _prepare_one_run(
     return segs_m1, segs_m2, segs_both, total_time_sec
 
 
-def _draw_three_band_panel(ax, segs_m1, segs_m2, segs_both, total_time_sec, style: FaceFixPlotStyle, title: str):
-    """Render the three timelines (m1 at 3a, m2 at 2a, AND at a) on one axes."""
+def _draw_three_band_panel_fast(ax, segs_m1, segs_m2, segs_both, total_time_sec, style: FaceFixPlotStyle, title: str):
+    """Fast renderer for previews: uses BrokenBarHCollection (not individually editable in Illustrator)."""
     a = style.a
     bh = style.bar_height
-    ax.broken_barh(segs_m1,   (3 * a - bh / 2, bh), facecolors=style.colors["m1"],   edgecolors=None)
-    ax.broken_barh(segs_m2,   (2 * a - bh / 2, bh), facecolors=style.colors["m2"],   edgecolors=None)
-    ax.broken_barh(segs_both, (1 * a - bh / 2, bh), facecolors=style.colors["both"], edgecolors=None)
+    ax.broken_barh(segs_m1,   (3 * a - bh / 2, bh), facecolors=style.colors["m1"],   edgecolors="none")
+    ax.broken_barh(segs_m2,   (2 * a - bh / 2, bh), facecolors=style.colors["m2"],   edgecolors="none")
+    ax.broken_barh(segs_both, (1 * a - bh / 2, bh), facecolors=style.colors["both"], edgecolors="none")
 
     ax.set_xlim(0, total_time_sec)
     ax.set_ylim(0, 4 * a)
@@ -857,17 +852,42 @@ def _draw_three_band_panel(ax, segs_m1, segs_m2, segs_both, total_time_sec, styl
     ax.set_yticklabels(["m1 & m2", "m2", "m1"])
     ax.set_xlabel("Time (s)")
     ax.set_title(title, fontsize=10)
-    ax.grid(False)  # no baseline
+    ax.grid(False)
+
+
+def _draw_three_band_panel_editable(ax, segs_m1, segs_m2, segs_both, total_time_sec, style: FaceFixPlotStyle, title: str):
+    """
+    Editable renderer for export: draws one Rectangle per segment so each bar is individually selectable in Illustrator.
+    """
+    a = style.a
+    bh = style.bar_height
+
+    def _add_rects(segs, y_center, color):
+        y0 = y_center - bh / 2.0
+        for (x, w) in segs:
+            if w <= 0:
+                continue
+            rect = mpatches.Rectangle((x, y0), width=w, height=bh, facecolor=color, edgecolor="none")
+            ax.add_patch(rect)
+
+    _add_rects(segs_m1,   3 * a, style.colors["m1"])
+    _add_rects(segs_m2,   2 * a, style.colors["m2"])
+    _add_rects(segs_both, 1 * a, style.colors["both"])
+
+    ax.set_xlim(0, total_time_sec)
+    ax.set_ylim(0, 4 * a)
+    ax.set_yticks([a, 2 * a, 3 * a])
+    ax.set_yticklabels(["m1 & m2", "m2", "m1"])
+    ax.set_xlabel("Time (s)")
+    ax.set_title(title, fontsize=10)
+    ax.grid(False)
 
 
 def _make_preview_grid(
-    sampled: List[Tuple[str, int]],
-    recs: Dict[Tuple[str, int], Dict[str, np.ndarray]],
-    run_lengths_df,
-    max_cols: int,
-    style: FaceFixPlotStyle,
+    sampled, recs, run_lengths_df, max_cols: int, style: FaceFixPlotStyle,
 ):
-    """Create the multi-run preview grid and return the figure."""
+    """(unchanged except it now calls the *fast* drawer)"""
+    import math
     n_panels = len(sampled)
     n_cols = min(max_cols, n_panels)
     n_rows = math.ceil(n_panels / n_cols)
@@ -889,7 +909,7 @@ def _make_preview_grid(
             bin_size_seconds=style.bin_size_seconds,
         )
 
-        _draw_three_band_panel(
+        _draw_three_band_panel_fast(
             ax=ax,
             segs_m1=segs_m1, segs_m2=segs_m2, segs_both=segs_both,
             total_time_sec=total_time_sec,
@@ -911,15 +931,18 @@ def _export_single_run(
     out_path: Path,
     style: FaceFixPlotStyle,
 ):
-    """Write a single-run vector PDF (no display)."""
+    """Write a single-run vector PDF with individually selectable bars."""
     f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height))
-    _draw_three_band_panel(
+
+    # Use the EDITABLE drawer for export
+    _draw_three_band_panel_editable(
         ax=ax,
         segs_m1=segs_m1, segs_m2=segs_m2, segs_both=segs_both,
         total_time_sec=total_time_sec,
         style=style,
         title=f"{session} • run {run}",
     )
+
     if style.tight_layout:
         f.tight_layout()
     f.savefig(out_path, format="pdf", dpi=300, transparent=True, metadata={
