@@ -513,7 +513,6 @@ class FixationDetector:
 
 
 # Fixation and saccade detection functions
-
 def _extract_non_nan_chunks(positions: np.ndarray) -> Tuple[List[np.ndarray], List[int]]:
     non_nan_chunks = []
     start_indices = []
@@ -647,3 +646,284 @@ def _categorize_fixations(location: List[str]) -> str:
         return "object"
     else:
         return "out_of_roi"
+
+
+
+## FOR PLOTTING ##
+
+from __future__ import annotations
+import math
+import random
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Tuple, List
+
+import numpy as np
+import matplotlib.pyplot as plt
+import logging
+logger = logging.getLogger(__name__)
+
+# =========================
+# Style / config for plots
+# =========================
+@dataclass
+class FaceFixPlotStyle:
+    bin_size_seconds: float = 0.001
+    a: float = 1.0                  # vertical unit
+    bar_height: float = 0.28
+    colors: Dict[str, str] = None   # keys: "m1", "m2", "both"
+    per_run_width: float = 4.0
+    per_run_height: float = 1.6
+    tight_layout: bool = True
+    max_cols: int = 5               # default grid width for previews
+
+    def __post_init__(self):
+        if self.colors is None:
+            self.colors = {"m1": "#1f77b4", "m2": "#2ca02c", "both": "#d62728"}
+
+
+# ==================================
+# Plotter that inherits the detector
+# ==================================
+class FixationPlotter(FixationDetector):
+    """
+    Plot-only subclass of FixationDetector.
+    Uses existing paths/configs from the detector but does NOT run detection.
+    """
+
+    def plot_face_fixation_timelines(
+        self,
+        n_samples: int = 5,
+        seed: int | None = None,
+        export_pdf_for: Tuple[str, int] | None = None,   # (session_name, run_number)
+        export_dir: Path | None = None,
+        style: FaceFixPlotStyle | None = None,
+    ) -> None:
+        """
+        Preview a grid of runs (one axes per run with 3 bands at y=3a (m1), 2a (m2), a (m1&m2)),
+        OR export a single run as a vector PDF.
+          - If `export_pdf_for` is provided, no preview is shown—only that run is exported.
+          - Otherwise previews `n_samples` random runs (no saving).
+
+        Assumes a face-fixation binary vector DF with columns:
+          session_name, run_number, agent in {'m1','m2'}, binary_vector.
+        Optionally uses gaze_data.run_lengths_df['length'] to cap timeline length.
+        """
+        style = style or FaceFixPlotStyle()
+
+        # Load once
+        face_df = self.get_binary_vector_df("face_fixation")
+        for col in ("session_name", "run_number", "agent", "binary_vector"):
+            if col not in face_df.columns:
+                raise KeyError(f"Required column '{col}' missing in face_df.")
+
+        # Optional run lengths
+        run_lengths_df = None
+        try:
+            self.gaze_data.load_dataframes(["run_lengths"])
+            run_lengths_df = getattr(self.gaze_data, "run_lengths_df", None)
+        except Exception:
+            pass
+
+        # Build lookup {(session, run): {'m1': vec, 'm2': vec}}
+        recs = _collect_face_vectors(face_df)
+
+        # Default export directory
+        if export_dir is None:
+            export_dir = (self.config.output_dir / "plots" / "fixation_timelines" /
+                          datetime.now().strftime("%Y-%m-%d"))
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        # ---- EXPORT-ONLY MODE ----
+        if export_pdf_for is not None:
+            session, run = export_pdf_for
+            segs_m1, segs_m2, segs_both, total_time_sec = _prepare_one_run(
+                session=session,
+                run=int(run),
+                recs=recs,
+                run_lengths_df=run_lengths_df,
+                bin_size_seconds=style.bin_size_seconds,
+            )
+            out_path = export_dir / f"{session}__run{run}__face_fixation_timelines.pdf"
+            _export_single_run(
+                segs_m1, segs_m2, segs_both, total_time_sec,
+                session=session, run=int(run),
+                out_path=out_path,
+                style=style,
+            )
+            logger.info(f"Saved PDF: {out_path}")
+            return
+
+        # ---- PREVIEW GRID MODE ----
+        both_keys = [(s, r) for (s, r), d in recs.items() if "m1" in d and "m2" in d]
+        if not both_keys:
+            logger.warning("No (session, run) with both m1 and m2 face-fixation vectors.")
+            return
+
+        rng = random.Random(seed)
+        sampled = rng.sample(both_keys, k=min(n_samples, len(both_keys)))
+
+        fig = _make_preview_grid(
+            sampled=sampled,
+            recs=recs,
+            run_lengths_df=run_lengths_df,
+            max_cols=style.max_cols,
+            style=style,
+        )
+
+        if style.tight_layout:
+            plt.tight_layout()
+        plt.show()
+
+
+# =========================
+# Helpers (module-level)
+# =========================
+def _collect_face_vectors(face_df) -> Dict[Tuple[str, int], Dict[str, np.ndarray]]:
+    """Return {(session, run): {'m1': vec, 'm2': vec}} using 'binary_vector'."""
+    recs: Dict[Tuple[str, int], Dict[str, np.ndarray]] = {}
+    for _, row in face_df.iterrows():
+        agent = row["agent"]
+        if agent not in ("m1", "m2"):
+            continue
+        key = (row["session_name"], int(row["run_number"]))
+        recs.setdefault(key, {})[agent] = np.asarray(row["binary_vector"], dtype=bool)
+    return recs
+
+
+def _segments_from_binary(vec: np.ndarray, bin_size_seconds: float) -> List[Tuple[float, float]]:
+    """Convert a 1D binary vector to broken_barh segments: [(start_sec, dur_sec), ...]."""
+    v = np.asarray(vec, dtype=np.uint8)
+    if v.size == 0:
+        return []
+    padded = np.pad(v, (1, 1), constant_values=0)
+    changes = np.flatnonzero(np.diff(padded))
+    starts = changes[::2]
+    stops = changes[1::2]  # exclusive
+    return [
+        (s * bin_size_seconds, (e - s) * bin_size_seconds)
+        for s, e in zip(starts, stops) if e > s
+    ]
+
+
+def _prepare_one_run(
+    session: str,
+    run: int,
+    recs: Dict[Tuple[str, int], Dict[str, np.ndarray]],
+    run_lengths_df,
+    bin_size_seconds: float,
+):
+    """Align vectors, compute AND, build segments, return (segs_m1, segs_m2, segs_both, total_time_sec)."""
+    key = (session, int(run))
+    if key not in recs or "m1" not in recs[key] or "m2" not in recs[key]:
+        raise KeyError(f"No face-fixation vectors for both agents at {key}.")
+
+    v1 = recs[key]["m1"]
+    v2 = recs[key]["m2"]
+    L = min(len(v1), len(v2))
+
+    if run_lengths_df is not None:
+        m = run_lengths_df[
+            (run_lengths_df["session_name"] == session) &
+            (run_lengths_df["run_number"] == int(run))
+        ]
+        if not m.empty and "length" in m.columns:
+            L = min(L, int(m.iloc[0]["length"]))
+
+    v1 = v1[:L]
+    v2 = v2[:L]
+    v_both = v1 & v2
+
+    segs_m1 = _segments_from_binary(v1, bin_size_seconds)
+    segs_m2 = _segments_from_binary(v2, bin_size_seconds)
+    segs_both = _segments_from_binary(v_both, bin_size_seconds)
+    total_time_sec = L * bin_size_seconds
+
+    return segs_m1, segs_m2, segs_both, total_time_sec
+
+
+def _draw_three_band_panel(ax, segs_m1, segs_m2, segs_both, total_time_sec, style: FaceFixPlotStyle, title: str):
+    """Render the three timelines (m1 at 3a, m2 at 2a, AND at a) on one axes."""
+    a = style.a
+    bh = style.bar_height
+    ax.broken_barh(segs_m1,   (3 * a - bh / 2, bh), facecolors=style.colors["m1"],   edgecolors=None)
+    ax.broken_barh(segs_m2,   (2 * a - bh / 2, bh), facecolors=style.colors["m2"],   edgecolors=None)
+    ax.broken_barh(segs_both, (1 * a - bh / 2, bh), facecolors=style.colors["both"], edgecolors=None)
+
+    ax.set_xlim(0, total_time_sec)
+    ax.set_ylim(0, 4 * a)
+    ax.set_yticks([a, 2 * a, 3 * a])
+    ax.set_yticklabels(["m1 & m2", "m2", "m1"])
+    ax.set_xlabel("Time (s)")
+    ax.set_title(title, fontsize=10)
+    ax.grid(False)  # no baseline
+
+
+def _make_preview_grid(
+    sampled: List[Tuple[str, int]],
+    recs: Dict[Tuple[str, int], Dict[str, np.ndarray]],
+    run_lengths_df,
+    max_cols: int,
+    style: FaceFixPlotStyle,
+):
+    """Create the multi-run preview grid and return the figure."""
+    n_panels = len(sampled)
+    n_cols = min(max_cols, n_panels)
+    n_rows = math.ceil(n_panels / n_cols)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(style.per_run_width * n_cols, style.per_run_height * n_rows),
+        squeeze=False
+    )
+
+    for idx, (session, run) in enumerate(sampled):
+        r_i, c_i = divmod(idx, n_cols)
+        ax = axes[r_i, c_i]
+
+        segs_m1, segs_m2, segs_both, total_time_sec = _prepare_one_run(
+            session=session, run=int(run),
+            recs=recs,
+            run_lengths_df=run_lengths_df,
+            bin_size_seconds=style.bin_size_seconds,
+        )
+
+        _draw_three_band_panel(
+            ax=ax,
+            segs_m1=segs_m1, segs_m2=segs_m2, segs_both=segs_both,
+            total_time_sec=total_time_sec,
+            style=style,
+            title=f"{session} • run {run}",
+        )
+
+    # Hide unused cells
+    for idx in range(n_panels, n_rows * n_cols):
+        r_i, c_i = divmod(idx, n_cols)
+        axes[r_i, c_i].axis("off")
+
+    return fig
+
+
+def _export_single_run(
+    segs_m1, segs_m2, segs_both, total_time_sec,
+    session: str, run: int,
+    out_path: Path,
+    style: FaceFixPlotStyle,
+):
+    """Write a single-run vector PDF (no display)."""
+    f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height))
+    _draw_three_band_panel(
+        ax=ax,
+        segs_m1=segs_m1, segs_m2=segs_m2, segs_both=segs_both,
+        total_time_sec=total_time_sec,
+        style=style,
+        title=f"{session} • run {run}",
+    )
+    if style.tight_layout:
+        f.tight_layout()
+    f.savefig(out_path, format="pdf", dpi=300, transparent=True, metadata={
+        "Title": f"{session} run {run} face fixation timelines",
+        "Subject": "Face-fixation timelines for m1, m2, and overlap",
+    })
+    plt.close(f)
