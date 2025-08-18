@@ -3,11 +3,13 @@ from socialgaze.config.base_config import BaseConfig
 from socialgaze.config.fixation_config import FixationConfig
 from socialgaze.config.fix_prob_config import FixProbConfig
 from socialgaze.config.interactivity_config import InteractivityConfig
+from socialgaze.config.crosscorr_config import CrossCorrConfig
 
 from socialgaze.data.gaze_data import GazeData
 from socialgaze.features.fixation_detector import FixationDetector
 from socialgaze.features.interactivity_detector import InteractivityDetector
 from socialgaze.features.fix_prob_detector import FixProbDetector, FixProbPlotter
+from socialgaze.features.crosscorr_calculator import CrossCorrCalculator
 
 # Import the new FixationPlotter class (in same module as FixationDetector)
 from socialgaze.features.fixation_detector import FixationPlotter, FaceFixPlotStyle
@@ -20,6 +22,7 @@ def main():
     fixation_config = FixationConfig()
     fix_prob_config = FixProbConfig()
     interactivity_config = InteractivityConfig()
+    crosscorr_config = CrossCorrConfig()
 
     # Initialize core data
     gaze_data = GazeData(config=base_config)
@@ -38,13 +41,21 @@ def main():
     #     export_pdf_for=("09042018", 3)
     # )
 
-    fix_prob_plotter = FixProbPlotter(
+    # fix_prob_plotter = FixProbPlotter(
+    #     fixation_detector=fixation_detector,
+    #     config=fix_prob_config,
+    #     interactivity_detector=interactivity_detector
+    # )
+
+    # fix_prob_plotter.plot_joint_vs_marginal_violin()
+
+    calculator = CrossCorrCalculator(
+        config=crosscorr_config,
         fixation_detector=fixation_detector,
-        config=fix_prob_config,
-        interactivity_detector=interactivity_detector
+        interactivity_detector=interactivity_detector,
     )
 
-    fix_prob_plotter.plot_joint_vs_marginal_violin()
+    calculator.plot_crosscorr_deltas_leader_follower_all_full_facefix()
 
 
 if __name__ == "__main__":
