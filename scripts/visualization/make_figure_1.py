@@ -41,21 +41,21 @@ def main():
     #     export_pdf_for=("09042018", 3)
     # )
 
-    # fix_prob_plotter = FixProbPlotter(
-    #     fixation_detector=fixation_detector,
-    #     config=fix_prob_config,
-    #     interactivity_detector=interactivity_detector
-    # )
-
-    # fix_prob_plotter.plot_joint_vs_marginal_violin()
-
-    calculator = CrossCorrCalculator(
-        config=crosscorr_config,
+    fix_prob_plotter = FixProbPlotter(
         fixation_detector=fixation_detector,
-        interactivity_detector=interactivity_detector,
+        config=fix_prob_config,
+        interactivity_detector=interactivity_detector
     )
 
-    calculator.plot_crosscorr_deltas_leader_follower_all_full_facefix()
+    fix_prob_plotter.plot_joint_vs_marginal_violin()
+
+    # calculator = CrossCorrCalculator(
+    #     config=crosscorr_config,
+    #     fixation_detector=fixation_detector,
+    #     interactivity_detector=interactivity_detector,
+    # )
+
+    # calculator.plot_crosscorr_deltas_leader_follower_all_full_facefix()
 
 
 if __name__ == "__main__":

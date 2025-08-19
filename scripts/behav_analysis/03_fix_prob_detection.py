@@ -36,6 +36,10 @@ def main():
         df = fix_prob_detector.compute_fixation_probabilities(mode)
         print(df.head(10))
 
+        # Example usage
+        pairs = [("object", "face")]  # add more if desired, e.g., [("object","face"), ("face","face")]
+        df_obj_face = fix_prob_detector.compute_fixation_probabilities(mode, category_pairs=pairs)
+
 
 if __name__ == "__main__":
     main()

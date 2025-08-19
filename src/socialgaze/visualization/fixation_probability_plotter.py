@@ -4,13 +4,22 @@ import os
 import logging
 import pandas as pd
 import seaborn as sns
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+import contextlib
 from scipy.stats import ks_2samp
 from scipy.stats.mstats import winsorize
 
 logger = logging.getLogger(__name__)
 
 def plot_joint_vs_marginal_violin(config, detector, mode: str):
+    mpl.rcParams.update({
+            "pdf.fonttype": 42,          # embed TrueType
+            "ps.fonttype": 42,
+            "path.simplify": False,      # keep exact paths (no weird merges)
+            "pdf.compression": 0,        # avoid compression-related AI quirks
+            "figure.dpi": 200,           # irrelevant for vector, fine to leave
+        })
     df = detector.get_data(mode)
     categories = ["face", "out_of_roi"]
     df = df[df["fixation_category"].isin(categories)].copy()
