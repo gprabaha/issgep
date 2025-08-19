@@ -36,14 +36,14 @@ def main():
     #     seed=None  # re-run to get different samples
     # )
 
-    # Pick 2 representative runs (edit to your choices)
-    reps_face_face = [("01072019", 6), ("02062018", 8), ("01112019", 9)]
-    plotter.export_representative_runs(
-        fixation_detector=fixdet,
-        pairing=("m1", "face", "m2", "face"),
-        session_runs=reps_face_face,
-        export_dir=fig2_dir / "face_face"
-    )
+    # # Pick 2 representative runs (edit to your choices)
+    # reps_face_face = [("01072019", 6), ("02062018", 8), ("01112019", 9)]
+    # plotter.export_representative_runs(
+    #     fixation_detector=fixdet,
+    #     pairing=("m1", "face", "m2", "face"),
+    #     session_runs=reps_face_face,
+    #     export_dir=fig2_dir / "face_face"
+    # )
 
     # # =============================
     # # Panel C (control): Obj–Face previews
@@ -63,13 +63,13 @@ def main():
     #     export_dir=fig2_dir / "obj_face"
     # )
 
-    # # =============================
-    # # Panel D/E: Face-fixation pies
-    # # =============================
-    # plotter.plot_face_fixation_pies_by_agent(
-    #     fixation_detector=fixdet,
-    #     export_dir=fig2_dir / "pies"
-    # )
+    # =============================
+    # Panel D/E: Face-fixation pies
+    # =============================
+    plotter.plot_face_fixation_pies_by_agent(
+        fixation_detector=fixdet,
+        export_dir=fig2_dir / "pies"
+    )
 
     # logger.info("Figure 2 assets generated.")
 
