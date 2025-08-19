@@ -465,7 +465,7 @@ class InteractivityPlotter(InteractivityDetector):
         df: pd.DataFrame,
         session: str,
         run: int,
-        pairing: Tuple[str, str, str, str],
+        pairing: tuple[str, str, str, str],
         export_path: Optional[Path],
         illustrator_friendly: bool = False,
         dpi: int = 300,
@@ -477,14 +477,14 @@ class InteractivityPlotter(InteractivityDetector):
         B = self._intervals_for(df, session, str(run), agentB, catB)
         use_precomp = (agentA, catA, agentB, catB) == ("m1", "face", "m2", "face")
         density = None
-        interactive_spans: List[Tuple[int, int]] = []
+        interactive_spans: list[tuple[int, int]] = []
 
         if use_precomp:
-            # Precomputed mutual density + interactivity windows
             dens = self._get_precomputed_density(session, run)
             if dens is not None:
                 density = dens
-            interactive_spans = self._get_interactivity_spans(session, run) 
+            interactive_spans = self._get_interactivity_spans(session, run)
+
         # If not precomputed (or missing), compute on the fly
         if density is None:
             L = 0
@@ -505,12 +505,12 @@ class InteractivityPlotter(InteractivityDetector):
             sigma = self._choose_sigma_samples(A, B)
             a_s = gaussian_filter1d(a, sigma=sigma, mode="nearest") if sigma and sigma > 0 else a
             b_s = gaussian_filter1d(b, sigma=sigma, mode="nearest") if sigma and sigma > 0 else b
-            
-            # === Normalize individual densities ===
+
+            # Normalize individual densities
             m1_density_norm = normalize_density(a_s)
             m2_density_norm = normalize_density(b_s)
 
-            # === Mutual density = sqrt(product), then normalized ===
+            # Mutual density = sqrt(product), then normalized
             mutual = np.sqrt(m1_density_norm * m2_density_norm)
             mut = normalize_density(mutual)
         else:
@@ -524,37 +524,79 @@ class InteractivityPlotter(InteractivityDetector):
         if illustrator_friendly:
             self._set_illustrator_pdf_rc()
 
-        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(11, 4.4), sharex=True, constrained_layout=True)
+        # Avoid constrained_layout to reduce clip paths
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(11, 4.4), sharex=True)
         ax_int, ax_den = axes
 
-        # Row 1: broken bars (same y track)
+        # Row 1: broken bars (no clipping)
         y0, height = 0.0, 1.0
         A_bars = [(s/1000.0, (e - s)/1000.0) for s, e in A]
         B_bars = [(s/1000.0, (e - s)/1000.0) for s, e in B]
-        ax_int.broken_barh(A_bars, (y0, height), facecolors="C0", alpha=0.85, label=f"{agentA} {catA}")
-        ax_int.broken_barh(B_bars, (y0, height), facecolors="C1", alpha=0.55, label=f"{agentB} {catB}")
+        ax_int.broken_barh(
+            A_bars, (y0, height),
+            facecolors="C0", alpha=0.85,
+            label=f"{agentA} {catA}",
+            clip_on=False, zorder=2
+        )
+        ax_int.broken_barh(
+            B_bars, (y0, height),
+            facecolors="C1", alpha=0.55,
+            label=f"{agentB} {catB}",
+            clip_on=False, zorder=1
+        )
         ax_int.set_ylim(-0.1, 1.1)
         ax_int.set_yticks([])
         ax_int.set_ylabel("Fixations")
         ax_int.legend(loc="upper right", frameon=False)
         ax_int.set_title(f"{session}, run {run} — {agentA}:{catA} vs {agentB}:{catB}")
 
-        # Row 2: density + threshold + shaded interactive spans
+        # Row 2: shaded spans (behind) + mutual density (chunked) + threshold
         t = np.arange(mut.size) / 1000.0
-        ax_den.plot(t, mut, linewidth=2, label="mutual density")
-        ax_den.axhline(thr, linestyle="--", linewidth=1.6, label=f"θ·mean (θ={self.config.interactivity_threshold:g})")
+
+        # Opaque light color to avoid AI opacity masks
+        span_color = "#e7f0fb"
+
+        # Spans behind everything; no clipping
         for s, e in interactive_spans:
-            ax_den.axvspan(s/1000.0, e/1000.0, alpha=0.15)
+            ax_den.axvspan(
+                s/1000.0, e/1000.0,
+                facecolor=span_color,
+                clip_on=False, zorder=0
+            )
+
+        # Mutual density, preserved fully but split into subpaths
+        _plot_chunked_line(
+            ax_den, t, mut,
+            max_points=10000,
+            label="mutual density",
+            linewidth=2,
+            zorder=3,
+            clip_on=False,
+            color="C0"   # or any consistent hex/RGB
+        )
+
+
+        # Threshold line above spans; no clipping
+        ax_den.axhline(
+            thr, linestyle="--", linewidth=1.6,
+            label=f"θ·mean (θ={self.config.interactivity_threshold:g})",
+            clip_on=False, zorder=2
+        )
+
         ax_den.set_xlabel("Time (s)")
         ax_den.set_ylabel("Density")
         ax_den.legend(loc="upper right", frameon=False)
-        
+
+        # Final layout AFTER creating all artists
+        fig.tight_layout()
+
         if export_path is None:
             plt.show()
         else:
             export_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.savefig(export_path, bbox_inches="tight", dpi=dpi)
+            fig.savefig(export_path, bbox_inches="tight")  # vector; dpi irrelevant for vector
             plt.close(fig)
+
 
     # ======== Windows & counts (use precomputed face–face periods) ========
 
@@ -697,7 +739,14 @@ class InteractivityPlotter(InteractivityDetector):
 
 
     def _set_illustrator_pdf_rc(self) -> None:
-        mpl.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "figure.dpi": 300})
+        mpl.rcParams.update({
+            "pdf.fonttype": 42,          # embed TrueType
+            "ps.fonttype": 42,
+            "path.simplify": False,      # keep exact paths (no weird merges)
+            "pdf.compression": 0,        # avoid compression-related AI quirks
+            "figure.dpi": 200,           # irrelevant for vector, fine to leave
+        })
+
 
     def _autopct(self, values: List[int]):
         total = float(sum(values) or 1)
@@ -739,3 +788,52 @@ class InteractivityPlotter(InteractivityDetector):
         if df is None or df.empty:
             return []
         return [(int(s), int(e)) for s, e in zip(df["start"].to_numpy(), df["stop"].to_numpy())]
+    
+
+# --- Helper: plot long polylines as smaller subpaths (Illustrator-safe) ---
+def _plot_chunked_line(
+    ax, x, y, *, max_points: int = 10000, label: str | None = None,
+    clip_on: bool = False, color=None, **kwargs
+):
+    """
+    Plot a long x/y polyline as multiple subpaths of <= max_points each.
+    - Preserves every vertex (no decimation).
+    - Breaks at NaNs before chunking.
+    - Only the first subpath receives the legend label.
+    - All chunks use the same color.
+    Returns a list of Line2D handles.
+    """
+    import numpy as np
+
+    x = np.asarray(x)
+    y = np.asarray(y)
+    assert x.shape == y.shape
+
+    isn = np.isnan(x) | np.isnan(y)
+    segments: list[tuple[int, int]] = []
+    start = None
+    for i, bad in enumerate(isn):
+        if not bad and start is None:
+            start = i
+        if (bad or i == len(x) - 1) and start is not None:
+            end = i if bad else i + 1  # stop-exclusive
+            if end > start:
+                segments.append((start, end))
+            start = None
+
+    handles = []
+    first = True
+    for s, e in segments:
+        for cs in range(s, e, max_points):
+            ce = min(cs + max_points, e)
+            (h,) = ax.plot(
+                x[cs:ce], y[cs:ce],
+                label=(label if first and label else None),
+                clip_on=clip_on,
+                color=color,           # force same color
+                **kwargs,
+            )
+            handles.append(h)
+            first = False
+    return handles
+
