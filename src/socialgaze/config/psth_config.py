@@ -21,6 +21,8 @@ class PSTHConfig(BaseConfig):
         self.smoothing_bin_sigma = 2  # Smoothing sigma in number of bins
         self.psth_bin_size = 0.01     # Bin size in seconds
         self.psth_window = (-0.5, 1)  # Window relative to event: (before, after) in seconds
+        self.min_consecutive_sig_bins = 5
+        self.min_total_sig_bins = 25
 
         # === PSTH path manager ===
         self.psth_paths = PSTHPaths(self)

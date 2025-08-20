@@ -12,6 +12,9 @@ from scipy.ndimage import gaussian_filter1d
 from pathlib import Path
 import matplotlib.pyplot as plt
 from scipy.stats import ttest_ind
+from matplotlib import rc_context
+from matplotlib.patches import Rectangle
+
 
 
 from socialgaze.utils.saving_utils import save_df_to_pkl
@@ -197,9 +200,19 @@ class PSTHExtractor:
     ) -> pd.DataFrame:
         """
         For each unit, test interactive vs non-interactive PSTHs (face fixations only)
-        with per-bin Welch t-tests (no FDR). A unit is 'significant' if any bin in the
-        test window has p < alpha.
+        with per-bin Welch t-tests (no FDR).
+
+        Significance rule:
+          - significant if (longest run of consecutive significant bins) >= min_consecutive_sig_bins
+            OR (total significant bins) >= min_total_sig_bins.
+
+        Thresholds are fetched from config with defaults:
+          - min_consecutive_sig_bins (default 5)
+          - min_total_sig_bins (default 25)
         """
+        min_consec = int(getattr(self.config, "min_consecutive_sig_bins", 5))
+        min_total  = int(getattr(self.config, "min_total_sig_bins", 25))
+
         if self.psth_per_trial is None:
             self.fetch_psth("trial_wise")
 
@@ -235,8 +248,8 @@ class PSTHExtractor:
                 })
                 continue
 
-            X = np.stack(g_int["firing_rate"].apply(np.array).values)   # (n_int, num_bins)
-            Y = np.stack(g_non["firing_rate"].apply(np.array).values)   # (n_non, num_bins)
+            X = np.stack(g_int["firing_rate"].apply(np.array).values)
+            Y = np.stack(g_non["firing_rate"].apply(np.array).values)
             if X.shape[1] != num_bins or Y.shape[1] != num_bins:
                 logger.warning(f"Bin mismatch for unit {unit_id}; skipping.")
                 rows.append({
@@ -248,6 +261,7 @@ class PSTHExtractor:
                 })
                 continue
 
+            # Per-bin Welch t-test
             pvals = np.ones(num_bins, dtype=float)
             for b in valid_idx:
                 try:
@@ -257,14 +271,14 @@ class PSTHExtractor:
                     pvals[b] = 1.0
 
             sig_bins = np.where((pvals < alpha) & valid_bins_mask)[0].tolist()
-            is_sig = len(sig_bins) > 0
+            is_sig = self._is_unit_significant(sig_bins, min_consec=min_consec, min_total=min_total)
 
             rows.append({
                 "unit_uuid": unit_id,
                 "region": region,
                 "channel": channel,
-                "n_interactive": int(len(X)),
-                "n_non_interactive": int(len(Y)),
+                "n_interactive": int(X.shape[0]),
+                "n_non_interactive": int(Y.shape[0]),
                 "significant": bool(is_sig),
                 "significant_bins": sig_bins,
                 "time_axis": time_axis.tolist(),
@@ -282,6 +296,39 @@ class PSTHExtractor:
             logger.info(f"Saved interactive face significance to {out_path}")
 
         return sig_df
+
+
+    @staticmethod
+    def _is_unit_significant(sig_bins: list[int], min_consec: int = 5, min_total: int = 25) -> bool:
+        """
+        Decide if a unit is significant based on its significant bins.
+
+        A unit is significant if:
+          - it has at least `min_consec` consecutive significant bins, OR
+          - it has at least `min_total` total significant bins.
+        """
+        if not sig_bins:
+            return False
+
+        arr = np.array(sorted(sig_bins), dtype=int)
+        if arr.size == 1:
+            longest_run = 1
+        else:
+            diffs = np.diff(arr) == 1
+            longest_run = 1
+            curr = 1
+            for contig in diffs:
+                if contig:
+                    curr += 1
+                else:
+                    if curr > longest_run:
+                        longest_run = curr
+                    curr = 1
+            if curr > longest_run:
+                longest_run = curr
+
+        return (longest_run >= min_consec) or (len(sig_bins) >= min_total)
+
 
 
 #---------------------------------------------------
@@ -406,12 +453,32 @@ def _process_fixation_row_for_psth(
 
 
 
+
+
+
+
+
+## ----------------
+## PSTH Plotter ##
+## ----------------
+
 class PSTHPlotter(PSTHExtractor):
     """
     Plots:
       1) Unit PSTHs for significant interactive vs non-interactive (face) units
       2) Per-region pie charts (significant vs non-significant)
+
+    Exports fully vector PDFs that are editable in Illustrator.
     """
+
+    # Illustrator-friendly rc settings (used with matplotlib.rc_context)
+    _ILLUSTRATOR_RC = {
+        "pdf.fonttype": 42,        # Embed TrueType fonts (editable text)
+        "ps.fonttype": 42,
+        "svg.fonttype": "none",    # If exporting SVGs too
+        "path.simplify": False,    # Preserve exact paths
+        "savefig.transparent": False,
+    }
 
     def plot_significant_interactive_vs_noninteractive_units(
         self,
@@ -419,7 +486,17 @@ class PSTHPlotter(PSTHExtractor):
         test_window: tuple[float, float] = (-0.45, 0.45),
         export_formats: tuple[str, ...] = ("pdf",),
         overwrite: bool = False,
+        illustrator_friendly: bool = True,
     ) -> pd.DataFrame:
+        """
+        Make unit-level PSTH plots for significant units and per-region pie charts.
+
+        Plots are saved under:
+            config.plots_dir / "psth" / "interactive_units" / <REGION> / ...
+
+        Significance table is read from (or computed/saved to):
+            config.output_dir / "results" / "interactive_face_significance.pkl"
+        """
         sig_df = self._load_or_compute_significance(alpha=alpha, test_window=test_window)
         if sig_df.empty:
             logger.warning("No significance results available; nothing to plot.")
@@ -439,8 +516,13 @@ class PSTHPlotter(PSTHExtractor):
             if not sig_units.empty:
                 logger.info(f"[{region_name}] Plotting {len(sig_units)} significant unit PSTHs...")
                 for _, row in sig_units.iterrows():
-                    self._plot_single_unit_psth(row=row, region_dir=region_dir,
-                                                export_formats=export_formats, overwrite=overwrite)
+                    self._plot_single_unit_psth(
+                        row=row,
+                        region_dir=region_dir,
+                        export_formats=export_formats,
+                        overwrite=overwrite,
+                        illustrator_friendly=illustrator_friendly,
+                    )
             else:
                 logger.info(f"[{region_name}] No significant units; skipping PSTH plots.")
 
@@ -451,30 +533,37 @@ class PSTHPlotter(PSTHExtractor):
                 out_dir=region_dir,
                 export_formats=export_formats,
                 overwrite=overwrite,
+                illustrator_friendly=illustrator_friendly,
             )
 
         return sig_df
 
-    # -------- helpers --------
+    # ------------- helpers -------------
 
     def _load_or_compute_significance(
         self,
         alpha: float,
         test_window: tuple[float, float],
     ) -> pd.DataFrame:
+        """
+        Load cached significance if present; otherwise compute using parent method.
+        """
         sig_path = Path(self.config.output_dir) / "results" / "interactive_face_significance.pkl"
         if sig_path.exists():
             try:
                 sig_df = load_df_from_pkl(str(sig_path))
-                needed = {"unit_uuid", "region", "significant", "time_axis",
-                          "mean_psth_interactive", "mean_psth_non_interactive"}
+                needed = {
+                    "unit_uuid", "region", "significant", "time_axis",
+                    "mean_psth_interactive", "mean_psth_non_interactive"
+                }
                 if needed.issubset(sig_df.columns):
                     logger.info(f"Loaded significance from {sig_path}")
                     return sig_df
-                logger.warning(f"Significance file missing columns; recomputing.")
+                logger.warning(f"Significance file {sig_path} missing columns; recomputing.")
             except Exception as e:
-                logger.warning(f"Failed to load significance file: {e}; recomputing.")
+                logger.warning(f"Failed to load significance file {sig_path}: {e}; recomputing.")
 
+        # Compute + save to config.output_dir / results
         return self.compute_interactive_face_significance(alpha=alpha, test_window=test_window, save=True)
 
     def _plot_single_unit_psth(
@@ -483,7 +572,12 @@ class PSTHPlotter(PSTHExtractor):
         region_dir: Path,
         export_formats: tuple[str, ...],
         overwrite: bool,
+        illustrator_friendly: bool = True,
     ) -> None:
+        """
+        Plot mean PSTH of interactive vs non-interactive for a single significant unit.
+        Shade significant bins using opaque rectangles (no alpha) to keep PDF vectorized.
+        """
         unit_id = row["unit_uuid"]
         time_axis = np.asarray(row["time_axis"], dtype=float)
         m_int = row["mean_psth_interactive"]
@@ -494,27 +588,59 @@ class PSTHPlotter(PSTHExtractor):
         m_non = np.asarray(m_non, dtype=float)
         sig_bins = row["significant_bins"] or []
 
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.plot(time_axis, m_int, label="Interactive", linewidth=2)
-        ax.plot(time_axis, m_non, label="Non-interactive", linewidth=2, linestyle="--")
+        ctx = rc_context(self._ILLUSTRATOR_RC) if illustrator_friendly else rc_context()
+        with ctx:
+            fig, ax = plt.subplots(figsize=(6, 4))
 
-        if len(sig_bins) > 0:
-            spans = _bins_to_spans(sig_bins, time_axis)
-            for (t0, t1) in spans:
-                ax.axvspan(t0, t1, alpha=0.15)
+            # Shade significant spans with opaque rectangles behind lines (no transparency)
+            if len(sig_bins) > 0:
+                spans = self._bins_to_spans(sig_bins, time_axis)
+                ymin = float(min(m_int.min(), m_non.min()))
+                ymax = float(max(m_int.max(), m_non.max()))
+                for (t0, t1) in spans:
+                    rect = Rectangle(
+                        (t0, ymin),
+                        width=(t1 - t0),
+                        height=(ymax - ymin),
+                        facecolor=(0.88, 0.88, 0.88),
+                        edgecolor="none",
+                        zorder=0,
+                    )
+                    ax.add_patch(rect)
 
-        ax.axvline(0.0, linestyle=":", linewidth=1)
-        ax.set_xlabel("Time from fixation onset (s)")
-        ax.set_ylabel("Firing rate (spikes/s)")
-        ax.set_title(f"Unit {unit_id}")
-        ax.legend(loc="upper right")
-        ax.margins(x=0)
+            # Editable vector strokes
+            ax.plot(
+                time_axis, m_int,
+                label="Interactive",
+                linewidth=2,
+                solid_joinstyle="round",
+                solid_capstyle="round",
+                antialiased=True,
+                zorder=2,
+            )
+            ax.plot(
+                time_axis, m_non,
+                label="Non-interactive",
+                linewidth=2,
+                linestyle="--",
+                solid_joinstyle="round",
+                solid_capstyle="round",
+                antialiased=True,
+                zorder=2,
+            )
 
-        for ext in export_formats:
-            out_path = region_dir / f"unit_{unit_id}.{ext}"
-            if overwrite or not out_path.exists():
-                fig.savefig(out_path, bbox_inches="tight")
-        plt.close(fig)
+            ax.axvline(0.0, linestyle=":", linewidth=1, zorder=1)
+            ax.set_xlabel("Time from fixation onset (s)")
+            ax.set_ylabel("Firing rate (spikes/s)")
+            ax.set_title(f"Unit {unit_id}")
+            ax.legend(loc="upper right")
+            ax.margins(x=0)
+
+            for ext in export_formats:
+                out_path = region_dir / f"unit_{unit_id}.{ext}"
+                if overwrite or not out_path.exists():
+                    fig.savefig(out_path, bbox_inches="tight")
+            plt.close(fig)
 
     def _plot_region_significance_pie(
         self,
@@ -523,36 +649,53 @@ class PSTHPlotter(PSTHExtractor):
         out_dir: Path,
         export_formats: tuple[str, ...],
         overwrite: bool,
+        illustrator_friendly: bool = True,
     ) -> None:
+        """
+        Pie chart: fraction of significant vs non-significant units in this region.
+        """
         n_sig = int(region_df["significant"].sum())
         n_total = int(len(region_df))
         n_non = n_total - n_sig
 
-        fig, ax = plt.subplots(figsize=(4.5, 4.5))
-        ax.pie([n_sig, n_non], labels=["Significant", "Not significant"], autopct="%1.0f%%", startangle=90)
-        ax.set_title(f"{region}: Interactive vs Non-interactive (face)")
+        ctx = rc_context(self._ILLUSTRATOR_RC) if illustrator_friendly else rc_context()
+        with ctx:
+            fig, ax = plt.subplots(figsize=(4.5, 4.5))
+            ax.pie(
+                [n_sig, n_non],
+                labels=["Significant", "Not significant"],
+                autopct="%1.0f%%",
+                startangle=90,
+                wedgeprops=dict(linewidth=0.5),  # thin editable edges
+                textprops=dict(),                 # keep as text (editable)
+            )
+            ax.set_title(f"{region}: Interactive vs Non-interactive (face)")
 
-        for ext in export_formats:
-            out_path = out_dir / f"{region}_interactive_face_signif_pie.{ext}"
-            if overwrite or not out_path.exists():
-                fig.savefig(out_path, bbox_inches="tight")
-        plt.close(fig)
+            for ext in export_formats:
+                out_path = out_dir / f"{region}_interactive_face_signif_pie.{ext}"
+                if overwrite or not out_path.exists():
+                    fig.savefig(out_path, bbox_inches="tight")
+            plt.close(fig)
 
-
-def _bins_to_spans(bin_indices: Iterable[int], time_axis: np.ndarray) -> list[tuple[float, float]]:
-    """Convert discrete significant bin indices to contiguous time spans (bin-center based)."""
-    if not bin_indices:
-        return []
-    bin_indices = np.array(sorted(bin_indices), dtype=int)
-    diffs = np.diff(bin_indices)
-    run_starts = np.r_[0, np.where(diffs != 1)[0] + 1]
-    run_ends = np.r_[run_starts[1:] - 1, len(bin_indices) - 1]
-    if len(time_axis) > 1:
-        half = np.median(np.diff(time_axis)) / 2.0
-    else:
-        half = 0.0
-    spans = []
-    for s, e in zip(run_starts, run_ends):
-        i0, i1 = bin_indices[s], bin_indices[e]
-        spans.append((float(time_axis[i0] - half), float(time_axis[i1] + half)))
-    return spans
+    # Keep it self-contained: convert discrete significant bin indices into contiguous spans
+    @staticmethod
+    def _bins_to_spans(bin_indices: Iterable[int], time_axis: np.ndarray) -> list[tuple[float, float]]:
+        """
+        Convert discrete bin indices to contiguous (start_time, end_time) spans.
+        Assumes `time_axis` are bin centers; spans extend half-bin to either side.
+        """
+        if not bin_indices:
+            return []
+        bin_indices = np.array(sorted(bin_indices), dtype=int)
+        diffs = np.diff(bin_indices)
+        run_starts = np.r_[0, np.where(diffs != 1)[0] + 1]
+        run_ends = np.r_[run_starts[1:] - 1, len(bin_indices) - 1]
+        if len(time_axis) > 1:
+            half = np.median(np.diff(time_axis)) / 2.0
+        else:
+            half = 0.0
+        spans = []
+        for s, e in zip(run_starts, run_ends):
+            i0, i1 = bin_indices[s], bin_indices[e]
+            spans.append((float(time_axis[i0] - half), float(time_axis[i1] + half)))
+        return spans
