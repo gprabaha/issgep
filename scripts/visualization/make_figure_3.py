@@ -57,9 +57,11 @@ def main():
 
     # 2) Make Illustrator‑friendly unit plots + per‑region pies
     #    Output dir: base_config.plots_dir / "psth" / "interactive_units" / <REGION> / ...
-    plotter.plot_significant_interactive_vs_noninteractive_units()
+    # plotter.plot_significant_interactive_vs_noninteractive_units()
 
-    logger.info(f"Figure 3 assets written under:\n  - {fig3_dir}\n  - {Path(base_config.plots_dir) / 'psth' / 'interactive_units'}")
+    # logger.info(f"Figure 3 assets written under:\n  - {fig3_dir}\n  - {Path(base_config.plots_dir) / 'psth' / 'interactive_units'}")
+
+    plotter.plot_region_heatmaps_of_sig_units()
 
 
 if __name__ == "__main__":

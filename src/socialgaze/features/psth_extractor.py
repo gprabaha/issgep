@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import ttest_ind
 from matplotlib import rc_context
 from matplotlib.patches import Rectangle
+from matplotlib.colors import TwoSlopeNorm
 
 
 
@@ -754,3 +755,205 @@ class PSTHPlotter(PSTHExtractor):
             i0, i1 = bin_indices[s], bin_indices[e]
             spans.append((float(time_axis[i0] - half), float(time_axis[i1] + half)))
         return spans
+
+
+    def plot_region_heatmaps_of_sig_units(
+        self,
+        export_formats: tuple[str, ...] = ("pdf",),
+        overwrite: bool = False,
+        illustrator_friendly: bool = True,
+        time_window: tuple[float, float] = (-0.5, 0.5),
+        outfile_basename: str = "region_sig_unit_index_heatmaps",
+    ) -> None:
+        """
+        Make a single-row figure (one subplot per region) showing heatmaps of the index:
+            (interactive - noninteractive) / (interactive + noninteractive)
+        for SIGNIFICANT units only, within `time_window` (default [-0.5, 0.5] s).
+
+        - Rows = units (sorted by time-of-maximum index per unit)
+        - Columns = time bins
+        - Top:   column sums over units
+        - Right: row sums over time
+        - One global color normalization across all regions with 0 -> white (diverging)
+
+        Exports a vector PDF (and any other requested formats) that is editable in Illustrator.
+        """
+        # Load significance table (or compute if missing)
+        sig_df = self._load_or_compute_significance(alpha=0.05, test_window=time_window)
+        if sig_df.empty:
+            logger.warning("No significance results available; skipping heatmap plotting.")
+            return
+
+        # Filter to significant units only
+        sig_df = sig_df[sig_df["significant"] == True].copy()
+        if sig_df.empty:
+            logger.info("No significant units to plot.")
+            return
+
+        # Collect per-region matrices within the window, and track global min/max for normalization
+        region_mats = {}          # region -> (matrix [n_units, n_time], time_centers [n_time], unit_ids [n_units])
+        global_min, global_max = np.inf, -np.inf
+
+        # Determine regions (preserve a consistent order)
+        regions = [r for r in sig_df["region"].dropna().unique().tolist()]
+        if len(regions) == 0:
+            regions = ["UnknownRegion"]
+
+        # Build per-region matrices
+        for region in regions:
+            rdf = sig_df[sig_df["region"] == region] if region != "UnknownRegion" else sig_df[sig_df["region"].isna()]
+            if rdf.empty:
+                continue
+
+            mats = []
+            unit_ids = []
+            time_centers = None
+
+            for _, row in rdf.iterrows():
+                t = np.asarray(row["time_axis"], dtype=float)
+                m_int = np.asarray(row["mean_psth_interactive"], dtype=float)
+                m_non = np.asarray(row["mean_psth_non_interactive"], dtype=float)
+                if m_int is None or m_non is None:
+                    continue
+
+                # Clip to requested window
+                mask = (t >= time_window[0]) & (t <= time_window[1])
+                if not mask.any():
+                    continue
+                t_win = t[mask]
+                x = m_int[mask]
+                y = m_non[mask]
+
+                denom = x + y
+                # Avoid division by zero: where denom == 0, set index to 0
+                idx = np.zeros_like(denom, dtype=float)
+                nz = denom != 0
+                idx[nz] = (x[nz] - y[nz]) / denom[nz]
+
+                mats.append(idx)
+                unit_ids.append(row["unit_uuid"])
+                time_centers = t_win  # should be consistent across rows
+
+            if len(mats) == 0:
+                continue
+
+            M = np.vstack(mats)  # [n_units, n_time]
+            # Sort rows by time location of maximum index (argmax). If ties, numpy returns first.
+            sort_keys = np.argmax(M, axis=1)
+            order = np.argsort(sort_keys, kind="stable")
+            M = M[order]
+            unit_ids = [unit_ids[i] for i in order]
+
+            # Track global min/max for consistent diverging norm
+            global_min = min(global_min, float(M.min()))
+            global_max = max(global_max, float(M.max()))
+
+            region_mats[region] = (M, time_centers, unit_ids)
+
+        if not region_mats:
+            logger.info("No region matrices constructed; nothing to plot.")
+            return
+
+        # Symmetric limits around 0 for diverging colormap; 0 -> white
+        vmax = max(abs(global_min), abs(global_max))
+        vmin = -vmax
+        norm = TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+
+        # Figure layout: one row, len(regions) columns; each column is a nested gridspec
+        base_plot_dir = Path(getattr(self.config, "plots_dir", getattr(self.config, "plot_dir", ".")))
+        out_dir = base_plot_dir / "psth" / "interactive_units"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Illustrator-friendly context
+        ctx = rc_context(self._ILLUSTRATOR_RC) if illustrator_friendly else rc_context()
+        with ctx:
+            # Make figure; width scales with number of regions
+            nR = len(regions)
+            fig = plt.figure(figsize=(6 * nR, 4.5))  # 6 inches per region column
+
+            # One shared colorbar; create dummy mappable
+            from matplotlib.cm import get_cmap
+            cmap = get_cmap("bwr")  # bwr has white center; TwoSlopeNorm ensures 0 maps to center
+            # Grid per region
+            import matplotlib.gridspec as gridspec
+            outer = gridspec.GridSpec(nrows=1, ncols=nR, wspace=0.35, hspace=0.0, figure=fig)
+
+            mappables = []
+            for ci, region in enumerate(regions):
+                if region not in region_mats:
+                    continue
+                M, t_centers, unit_ids = region_mats[region]
+                n_units, n_time = M.shape
+
+                # Compute edges for pcolormesh (vector rectangles; Illustrator-friendly)
+                dt = np.median(np.diff(t_centers)) if len(t_centers) > 1 else 1.0
+                t_edges = np.concatenate(([t_centers[0] - dt / 2], t_centers + dt / 2))
+                y_edges = np.arange(n_units + 1)
+
+                # Nested gridspec: top (column sums), middle (heatmap), right (row sums)
+                gs = gridspec.GridSpecFromSubplotSpec(
+                    2, 2,
+                    subplot_spec=outer[0, ci],
+                    width_ratios=[8, 1.8],
+                    height_ratios=[1.2, 8],
+                    wspace=0.05,
+                    hspace=0.05,
+                )
+
+                ax_top = fig.add_subplot(gs[0, 0])
+                ax_heat = fig.add_subplot(gs[1, 0], sharex=ax_top)
+                ax_right = fig.add_subplot(gs[1, 1], sharey=ax_heat)
+
+                # Heatmap (vector via pcolormesh; no alpha)
+                quad = ax_heat.pcolormesh(
+                    t_edges, y_edges, M,
+                    cmap=cmap, norm=norm, shading="flat", antialiased=False
+                )
+                mappables.append(quad)
+
+                # Column sums (over units)
+                col_sums = M.sum(axis=0)
+                ax_top.plot(t_centers, col_sums, linewidth=1.0)
+                ax_top.axvline(0.0, linestyle=":", linewidth=1)
+                ax_top.set_xlim(time_window)
+                ax_top.set_xticklabels([])  # no x labels on the top marginal
+                ax_top.set_ylabel("Σ rows", fontsize=9)
+
+                # Row sums (over time) as horizontal bars (vector)
+                row_sums = M.sum(axis=1)
+                y_idx = np.arange(n_units)
+                ax_right.barh(y_idx + 0.5, row_sums, height=1.0)  # align with pcolormesh cells
+                ax_right.set_xlabel("Σ cols", fontsize=9)
+                ax_right.yaxis.set_ticks([])  # no y ticks on side marginal
+
+                # Heatmap axes cosmetics
+                ax_heat.set_xlim(time_window)
+                ax_heat.set_ylim(0, n_units)
+                ax_heat.set_xlabel("Time from fixation onset (s)")
+                if ci == 0:
+                    ax_heat.set_ylabel("Units (sorted by argmax)")
+                else:
+                    ax_heat.set_yticklabels([])
+
+                ax_heat.axvline(0.0, linestyle=":", linewidth=1)
+
+                # Region title
+                pretty_region = str(region) if region is not None else "UnknownRegion"
+                ax_top.set_title(pretty_region, pad=6)
+
+            # Shared colorbar (right of the last axes)
+            # Use the last mappable as representative
+            if mappables:
+                cax = fig.add_axes([0.92, 0.15, 0.015, 0.7])  # [left, bottom, width, height] in fig coords
+                cb = fig.colorbar(mappables[-1], cax=cax)
+                cb.set_label("(I - N) / (I + N)")
+
+            # Tight-ish layout without cutting colorbar
+            fig.subplots_adjust(left=0.06, right=0.90, top=0.92, bottom=0.12)
+
+            # Export
+            for ext in export_formats:
+                out_path = out_dir / f"{outfile_basename}.{ext}"
+                if overwrite or not out_path.exists():
+                    fig.savefig(out_path, bbox_inches="tight")
+            plt.close(fig)
