@@ -167,6 +167,7 @@ class PSTHExtractor:
         if which == "trial_wise":
             path = self.config.psth_per_trial_path
             if os.path.exists(path):
+                logger.info(f"Loading PSTH per trial from {path}")
                 self.psth_per_trial = load_df_from_pkl(path)
                 logger.info(f"Loaded PSTH per trial from {path}")
             else:
@@ -195,7 +196,7 @@ class PSTHExtractor:
     def compute_interactive_face_significance(
         self,
         alpha: float = 0.05,
-        test_window: tuple[float, float] = (-0.45, 0.45),
+        test_window: tuple[float, float] = (-0.5, 0.5),
         save: bool = True,
     ) -> pd.DataFrame:
         """
@@ -210,6 +211,9 @@ class PSTHExtractor:
           - min_consecutive_sig_bins (default 5)
           - min_total_sig_bins (default 25)
         """
+        from tqdm import tqdm
+
+        # Thresholds from config (with defaults)
         min_consec = int(getattr(self.config, "min_consecutive_sig_bins", 5))
         min_total  = int(getattr(self.config, "min_total_sig_bins", 25))
 
@@ -222,6 +226,7 @@ class PSTHExtractor:
             logger.warning("No face-fixation PSTHs found; skipping significance.")
             return pd.DataFrame()
 
+        # Build time axis
         bin_size = self.config.psth_bin_size
         start_offset, end_offset = self.config.psth_window
         num_bins = int((end_offset - start_offset) / bin_size)
@@ -230,72 +235,100 @@ class PSTHExtractor:
         valid_bins_mask = (time_axis >= test_window[0]) & (time_axis <= test_window[1])
         valid_idx = np.where(valid_bins_mask)[0]
 
+        n_units = df_face["unit_uuid"].nunique()
+        logger.info(
+            f"Interactive-vs-NonInteractive (face) significance:\n"
+            f"  alpha={alpha}, window={test_window}, bins={num_bins}\n"
+            f"  thresholds: min_consecutive={min_consec}, min_total={min_total}\n"
+            f"  units to test: {n_units}"
+        )
+
         rows = []
-        for unit_id, g in df_face.groupby("unit_uuid"):
-            region = g["region"].iloc[0] if "region" in g.columns else None
-            channel = g["channel"].iloc[0] if "channel" in g.columns else None
+        sig_count = 0
 
-            g_int = g[g["is_interactive"] == "interactive"]
-            g_non = g[g["is_interactive"] == "non-interactive"]
+        for unit_id, g in tqdm(df_face.groupby("unit_uuid"), total=n_units, desc="Testing units (face)"):
+            try:
+                region = g["region"].iloc[0] if "region" in g.columns else None
+                channel = g["channel"].iloc[0] if "channel" in g.columns else None
 
-            if g_int.empty or g_non.empty:
+                g_int = g[g["is_interactive"] == "interactive"]
+                g_non = g[g["is_interactive"] == "non-interactive"]
+
+                if g_int.empty or g_non.empty:
+                    rows.append({
+                        "unit_uuid": unit_id, "region": region, "channel": channel,
+                        "n_interactive": len(g_int), "n_non_interactive": len(g_non),
+                        "significant": False, "significant_bins": [],
+                        "time_axis": time_axis.tolist(),
+                        "mean_psth_interactive": None, "mean_psth_non_interactive": None,
+                    })
+                    continue
+
+                X = np.stack(g_int["firing_rate"].apply(np.array).values)
+                Y = np.stack(g_non["firing_rate"].apply(np.array).values)
+                if X.shape[1] != num_bins or Y.shape[1] != num_bins:
+                    logger.warning(f"Bin mismatch for unit {unit_id}; skipping.")
+                    rows.append({
+                        "unit_uuid": unit_id, "region": region, "channel": channel,
+                        "n_interactive": len(g_int), "n_non_interactive": len(g_non),
+                        "significant": False, "significant_bins": [],
+                        "time_axis": time_axis.tolist(),
+                        "mean_psth_interactive": None, "mean_psth_non_interactive": None,
+                    })
+                    continue
+
+                # Per-bin Welch t-test on valid window
+                pvals = np.ones(num_bins, dtype=float)
+                for b in valid_idx:
+                    try:
+                        pvals[b] = ttest_ind(X[:, b], Y[:, b], equal_var=False, nan_policy="omit").pvalue
+                    except Exception as e:
+                        logger.debug(f"ttest failed for unit {unit_id}, bin {b}: {e}")
+                        pvals[b] = 1.0
+
+                sig_bins = np.where((pvals < alpha) & valid_bins_mask)[0].tolist()
+                is_sig = self._is_unit_significant(sig_bins, min_consec=min_consec, min_total=min_total)
+                if is_sig:
+                    sig_count += 1
+
                 rows.append({
-                    "unit_uuid": unit_id, "region": region, "channel": channel,
-                    "n_interactive": len(g_int), "n_non_interactive": len(g_non),
+                    "unit_uuid": unit_id,
+                    "region": region,
+                    "channel": channel,
+                    "n_interactive": int(X.shape[0]),
+                    "n_non_interactive": int(Y.shape[0]),
+                    "significant": bool(is_sig),
+                    "significant_bins": sig_bins,
+                    "time_axis": time_axis.tolist(),
+                    "mean_psth_interactive": X.mean(axis=0).tolist(),
+                    "mean_psth_non_interactive": Y.mean(axis=0).tolist(),
+                })
+
+            except Exception as e:
+                logger.exception(f"Error while processing unit {unit_id}: {e}")
+                rows.append({
+                    "unit_uuid": unit_id,
+                    "region": g["region"].iloc[0] if "region" in g.columns else None,
+                    "channel": g["channel"].iloc[0] if "channel" in g.columns else None,
+                    "n_interactive": int(g[g['is_interactive'] == 'interactive'].shape[0]),
+                    "n_non_interactive": int(g[g['is_interactive'] == 'non-interactive'].shape[0]),
                     "significant": False, "significant_bins": [],
                     "time_axis": time_axis.tolist(),
                     "mean_psth_interactive": None, "mean_psth_non_interactive": None,
                 })
-                continue
-
-            X = np.stack(g_int["firing_rate"].apply(np.array).values)
-            Y = np.stack(g_non["firing_rate"].apply(np.array).values)
-            if X.shape[1] != num_bins or Y.shape[1] != num_bins:
-                logger.warning(f"Bin mismatch for unit {unit_id}; skipping.")
-                rows.append({
-                    "unit_uuid": unit_id, "region": region, "channel": channel,
-                    "n_interactive": len(g_int), "n_non_interactive": len(g_non),
-                    "significant": False, "significant_bins": [],
-                    "time_axis": time_axis.tolist(),
-                    "mean_psth_interactive": None, "mean_psth_non_interactive": None,
-                })
-                continue
-
-            # Per-bin Welch t-test
-            pvals = np.ones(num_bins, dtype=float)
-            for b in valid_idx:
-                try:
-                    pvals[b] = ttest_ind(X[:, b], Y[:, b], equal_var=False, nan_policy="omit").pvalue
-                except Exception as e:
-                    logger.debug(f"ttest failed for unit {unit_id}, bin {b}: {e}")
-                    pvals[b] = 1.0
-
-            sig_bins = np.where((pvals < alpha) & valid_bins_mask)[0].tolist()
-            is_sig = self._is_unit_significant(sig_bins, min_consec=min_consec, min_total=min_total)
-
-            rows.append({
-                "unit_uuid": unit_id,
-                "region": region,
-                "channel": channel,
-                "n_interactive": int(X.shape[0]),
-                "n_non_interactive": int(Y.shape[0]),
-                "significant": bool(is_sig),
-                "significant_bins": sig_bins,
-                "time_axis": time_axis.tolist(),
-                "mean_psth_interactive": X.mean(axis=0).tolist(),
-                "mean_psth_non_interactive": Y.mean(axis=0).tolist(),
-            })
 
         sig_df = pd.DataFrame(rows)
+        logger.info(f"Significance complete: {sig_count} / {n_units} units marked significant.")
 
         if save:
             out_dir = Path(self.config.output_dir) / "results"
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / "interactive_face_significance.pkl"
-            save_df_to_pkl(sig_df, str(out_path))
+            save_df_to_pkl(sig_df, out_path)
             logger.info(f"Saved interactive face significance to {out_path}")
 
         return sig_df
+
 
 
     @staticmethod
@@ -483,7 +516,7 @@ class PSTHPlotter(PSTHExtractor):
     def plot_significant_interactive_vs_noninteractive_units(
         self,
         alpha: float = 0.05,
-        test_window: tuple[float, float] = (-0.45, 0.45),
+        test_window: tuple[float, float] = (-0.5, 0.5),
         export_formats: tuple[str, ...] = ("pdf",),
         overwrite: bool = False,
         illustrator_friendly: bool = True,
@@ -551,7 +584,7 @@ class PSTHPlotter(PSTHExtractor):
         sig_path = Path(self.config.output_dir) / "results" / "interactive_face_significance.pkl"
         if sig_path.exists():
             try:
-                sig_df = load_df_from_pkl(str(sig_path))
+                sig_df = load_df_from_pkl(sig_path)
                 needed = {
                     "unit_uuid", "region", "significant", "time_axis",
                     "mean_psth_interactive", "mean_psth_non_interactive"
@@ -635,12 +668,14 @@ class PSTHPlotter(PSTHExtractor):
             ax.set_title(f"Unit {unit_id}")
             ax.legend(loc="upper right")
             ax.margins(x=0)
+            ax.set_xlim(-0.5, 0.5)
 
             for ext in export_formats:
                 out_path = region_dir / f"unit_{unit_id}.{ext}"
                 if overwrite or not out_path.exists():
                     fig.savefig(out_path, bbox_inches="tight")
             plt.close(fig)
+
 
     def _plot_region_significance_pie(
         self,
@@ -652,30 +687,50 @@ class PSTHPlotter(PSTHExtractor):
         illustrator_friendly: bool = True,
     ) -> None:
         """
-        Pie chart: fraction of significant vs non-significant units in this region.
+        Pie chart: fraction and count of significant vs non-significant units in this region.
+        Shows labels as: "Significant (X/Y, ZZ%)" and "Not significant (N/Y, ZZ%)".
+        The 'Significant' slice is separated (exploded) for emphasis.
         """
-        n_sig = int(region_df["significant"].sum())
         n_total = int(len(region_df))
+        n_sig = int(region_df["significant"].sum()) if n_total > 0 else 0
         n_non = n_total - n_sig
+        pct_sig = (100.0 * n_sig / n_total) if n_total > 0 else 0.0
+        pct_non = 100.0 - pct_sig if n_total > 0 else 0.0
+
+        # Labels include counts and percentages
+        labels = [
+            f"Significant ({n_sig}/{n_total}, {pct_sig:.0f}%)",
+            f"Not significant ({n_non}/{n_total}, {pct_non:.0f}%)",
+        ]
+
+        # Explode the 'Significant' slice slightly
+        explode = (0.08, 0.0) if n_sig > 0 else (0.0, 0.0)
 
         ctx = rc_context(self._ILLUSTRATOR_RC) if illustrator_friendly else rc_context()
         with ctx:
             fig, ax = plt.subplots(figsize=(4.5, 4.5))
-            ax.pie(
-                [n_sig, n_non],
-                labels=["Significant", "Not significant"],
-                autopct="%1.0f%%",
-                startangle=90,
-                wedgeprops=dict(linewidth=0.5),  # thin editable edges
-                textprops=dict(),                 # keep as text (editable)
-            )
-            ax.set_title(f"{region}: Interactive vs Non-interactive (face)")
+
+            if n_total == 0:
+                ax.text(0.5, 0.5, f"{region}\nNo units", ha="center", va="center")
+                ax.axis("off")
+            else:
+                ax.pie(
+                    [n_sig, n_non],
+                    labels=labels,
+                    startangle=90,
+                    explode=explode,
+                    autopct=None,                   # percentages are already in labels
+                    wedgeprops=dict(linewidth=0.5), # thin editable edges
+                    textprops=dict(),               # keep as text (editable)
+                )
+                ax.set_title(f"{region}: Interactive vs Non-interactive (face)")
 
             for ext in export_formats:
                 out_path = out_dir / f"{region}_interactive_face_signif_pie.{ext}"
                 if overwrite or not out_path.exists():
                     fig.savefig(out_path, bbox_inches="tight")
             plt.close(fig)
+
 
     # Keep it self-contained: convert discrete significant bin indices into contiguous spans
     @staticmethod
