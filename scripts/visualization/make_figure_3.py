@@ -63,6 +63,8 @@ def main():
 
     plotter.plot_region_heatmaps_of_sig_units()
 
+    plotter.plot_region_violin_summaries()
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

@@ -766,48 +766,42 @@ class PSTHPlotter(PSTHExtractor):
         outfile_basename: str = "region_sig_unit_index_heatmaps",
     ) -> None:
         """
-        Make a single-row figure (one subplot per region) showing heatmaps of the index:
+        One-row figure: a panel per region with the index heatmap:
             (interactive - noninteractive) / (interactive + noninteractive)
-        for SIGNIFICANT units only, within `time_window` (default [-0.5, 0.5] s).
+        for SIGNIFICANT units within `time_window`.
 
-        - Rows = units (sorted by time-of-maximum index per unit)
-        - Columns = time bins
-        - Top:   column sums over units
-        - Right: row sums over time
-        - One global color normalization across all regions with 0 -> white (diverging)
-
-        Exports a vector PDF (and any other requested formats) that is editable in Illustrator.
+        Rows = units (sorted by argmax time per unit, low→high)
+        Columns = time bins
+        Top:   column sums
+        Right: row sums
+        Ticks: show time ticks and rough unit-number ticks on each panel
         """
-        # Load significance table (or compute if missing)
+        from matplotlib.colors import TwoSlopeNorm
+        import matplotlib.gridspec as gridspec
+
         sig_df = self._load_or_compute_significance(alpha=0.05, test_window=time_window)
         if sig_df.empty:
             logger.warning("No significance results available; skipping heatmap plotting.")
             return
 
-        # Filter to significant units only
         sig_df = sig_df[sig_df["significant"] == True].copy()
         if sig_df.empty:
             logger.info("No significant units to plot.")
             return
 
-        # Collect per-region matrices within the window, and track global min/max for normalization
-        region_mats = {}          # region -> (matrix [n_units, n_time], time_centers [n_time], unit_ids [n_units])
+        region_mats = {}
         global_min, global_max = np.inf, -np.inf
 
-        # Determine regions (preserve a consistent order)
         regions = [r for r in sig_df["region"].dropna().unique().tolist()]
         if len(regions) == 0:
             regions = ["UnknownRegion"]
 
-        # Build per-region matrices
         for region in regions:
             rdf = sig_df[sig_df["region"] == region] if region != "UnknownRegion" else sig_df[sig_df["region"].isna()]
             if rdf.empty:
                 continue
 
-            mats = []
-            unit_ids = []
-            time_centers = None
+            mats, unit_ids, time_centers = [], [], None
 
             for _, row in rdf.iterrows():
                 t = np.asarray(row["time_axis"], dtype=float)
@@ -816,7 +810,6 @@ class PSTHPlotter(PSTHExtractor):
                 if m_int is None or m_non is None:
                     continue
 
-                # Clip to requested window
                 mask = (t >= time_window[0]) & (t <= time_window[1])
                 if not mask.any():
                     continue
@@ -825,26 +818,25 @@ class PSTHPlotter(PSTHExtractor):
                 y = m_non[mask]
 
                 denom = x + y
-                # Avoid division by zero: where denom == 0, set index to 0
                 idx = np.zeros_like(denom, dtype=float)
                 nz = denom != 0
                 idx[nz] = (x[nz] - y[nz]) / denom[nz]
 
                 mats.append(idx)
                 unit_ids.append(row["unit_uuid"])
-                time_centers = t_win  # should be consistent across rows
+                time_centers = t_win
 
             if len(mats) == 0:
                 continue
 
             M = np.vstack(mats)  # [n_units, n_time]
-            # Sort rows by time location of maximum index (argmax). If ties, numpy returns first.
+
+            # Sort by argmax location, low → high
             sort_keys = np.argmax(M, axis=1)
             order = np.argsort(sort_keys, kind="stable")
             M = M[order]
             unit_ids = [unit_ids[i] for i in order]
 
-            # Track global min/max for consistent diverging norm
             global_min = min(global_min, float(M.min()))
             global_max = max(global_max, float(M.max()))
 
@@ -854,28 +846,18 @@ class PSTHPlotter(PSTHExtractor):
             logger.info("No region matrices constructed; nothing to plot.")
             return
 
-        # Symmetric limits around 0 for diverging colormap; 0 -> white
         vmax = max(abs(global_min), abs(global_max))
         vmin = -vmax
         norm = TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
 
-        # Figure layout: one row, len(regions) columns; each column is a nested gridspec
         base_plot_dir = Path(getattr(self.config, "plots_dir", getattr(self.config, "plot_dir", ".")))
         out_dir = base_plot_dir / "psth" / "interactive_units"
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Illustrator-friendly context
         ctx = rc_context(self._ILLUSTRATOR_RC) if illustrator_friendly else rc_context()
         with ctx:
-            # Make figure; width scales with number of regions
             nR = len(regions)
-            fig = plt.figure(figsize=(6 * nR, 4.5))  # 6 inches per region column
-
-            # One shared colorbar; create dummy mappable
-            from matplotlib.cm import get_cmap
-            cmap = get_cmap("bwr")  # bwr has white center; TwoSlopeNorm ensures 0 maps to center
-            # Grid per region
-            import matplotlib.gridspec as gridspec
+            fig = plt.figure(figsize=(6 * nR, 5.0))
             outer = gridspec.GridSpec(nrows=1, ncols=nR, wspace=0.35, hspace=0.0, figure=fig)
 
             mappables = []
@@ -883,14 +865,12 @@ class PSTHPlotter(PSTHExtractor):
                 if region not in region_mats:
                     continue
                 M, t_centers, unit_ids = region_mats[region]
-                n_units, n_time = M.shape
+                n_units, _ = M.shape
 
-                # Compute edges for pcolormesh (vector rectangles; Illustrator-friendly)
                 dt = np.median(np.diff(t_centers)) if len(t_centers) > 1 else 1.0
                 t_edges = np.concatenate(([t_centers[0] - dt / 2], t_centers + dt / 2))
                 y_edges = np.arange(n_units + 1)
 
-                # Nested gridspec: top (column sums), middle (heatmap), right (row sums)
                 gs = gridspec.GridSpecFromSubplotSpec(
                     2, 2,
                     subplot_spec=outer[0, ci],
@@ -904,56 +884,220 @@ class PSTHPlotter(PSTHExtractor):
                 ax_heat = fig.add_subplot(gs[1, 0], sharex=ax_top)
                 ax_right = fig.add_subplot(gs[1, 1], sharey=ax_heat)
 
-                # Heatmap (vector via pcolormesh; no alpha)
                 quad = ax_heat.pcolormesh(
                     t_edges, y_edges, M,
-                    cmap=cmap, norm=norm, shading="flat", antialiased=False
+                    cmap="bwr", norm=norm, shading="flat", antialiased=False
                 )
                 mappables.append(quad)
 
-                # Column sums (over units)
+                # Column sums
                 col_sums = M.sum(axis=0)
                 ax_top.plot(t_centers, col_sums, linewidth=1.0)
                 ax_top.axvline(0.0, linestyle=":", linewidth=1)
                 ax_top.set_xlim(time_window)
-                ax_top.set_xticklabels([])  # no x labels on the top marginal
                 ax_top.set_ylabel("Σ rows", fontsize=9)
+                # Show x ticks on the heatmap; keep some ticks on top for context
+                ax_top.set_xticks(np.linspace(time_window[0], time_window[1], 5))
+                ax_top.set_xticklabels([f"{x:.2f}" for x in np.linspace(time_window[0], time_window[1], 5)], fontsize=8)
 
-                # Row sums (over time) as horizontal bars (vector)
+                # Row sums
                 row_sums = M.sum(axis=1)
                 y_idx = np.arange(n_units)
-                ax_right.barh(y_idx + 0.5, row_sums, height=1.0)  # align with pcolormesh cells
+                ax_right.barh(y_idx + 0.5, row_sums, height=1.0)
                 ax_right.set_xlabel("Σ cols", fontsize=9)
-                ax_right.yaxis.set_ticks([])  # no y ticks on side marginal
+                ax_right.yaxis.set_ticks([])
 
-                # Heatmap axes cosmetics
+                # Heatmap axis ticks & labels
                 ax_heat.set_xlim(time_window)
                 ax_heat.set_ylim(0, n_units)
                 ax_heat.set_xlabel("Time from fixation onset (s)")
-                if ci == 0:
-                    ax_heat.set_ylabel("Units (sorted by argmax)")
-                else:
-                    ax_heat.set_yticklabels([])
-
                 ax_heat.axvline(0.0, linestyle=":", linewidth=1)
 
-                # Region title
-                pretty_region = str(region) if region is not None else "UnknownRegion"
-                ax_top.set_title(pretty_region, pad=6)
+                # Time ticks
+                ax_heat.set_xticks(np.linspace(time_window[0], time_window[1], 5))
+                ax_heat.set_xticklabels([f"{x:.2f}" for x in np.linspace(time_window[0], time_window[1], 5)], fontsize=9)
 
-            # Shared colorbar (right of the last axes)
-            # Use the last mappable as representative
+                # Rough unit-number ticks (centers)
+                if n_units > 0:
+                    step = max(1, n_units // 10)
+                    ytick_pos = np.arange(0.5, n_units + 0.5, step)
+                    ytick_lab = [str(int(i + 0.5)) for i in np.arange(0, n_units, step)]
+                    ax_heat.set_yticks(ytick_pos)
+                    ax_heat.set_yticklabels(ytick_lab, fontsize=9)
+                ax_heat.set_ylabel("Units (sorted by argmax ↑)")
+
+                pretty_region = str(region) if region is not None else "UnknownRegion"
+                ax_top.set_title(f"{pretty_region} (n={n_units} sig units)", pad=6)
+
             if mappables:
-                cax = fig.add_axes([0.92, 0.15, 0.015, 0.7])  # [left, bottom, width, height] in fig coords
+                cax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
                 cb = fig.colorbar(mappables[-1], cax=cax)
                 cb.set_label("(I - N) / (I + N)")
 
-            # Tight-ish layout without cutting colorbar
             fig.subplots_adjust(left=0.06, right=0.90, top=0.92, bottom=0.12)
 
-            # Export
             for ext in export_formats:
                 out_path = out_dir / f"{outfile_basename}.{ext}"
                 if overwrite or not out_path.exists():
                     fig.savefig(out_path, bbox_inches="tight")
             plt.close(fig)
+
+    def plot_region_violin_summaries(
+        self,
+        export_formats: tuple[str, ...] = ("pdf",),
+        overwrite: bool = False,
+        illustrator_friendly: bool = True,
+        time_window: tuple[float, float] = (-0.5, 0.5),
+        out_basename_prefix: str = "region_violin",
+    ) -> None:
+        """
+        Create three separate figures (Illustrator-friendly vector PDFs):
+          1) Violin of max-index location (time) per region + pairwise Welch t-tests
+          2) Violin of index-sum per unit (Σ over time) per region + pairwise Welch t-tests
+          3) Violin of min-index location (time) per region + pairwise Welch t-tests
+
+        Only SIGNIFICANT units are included. The index is:
+            (interactive - noninteractive) / (interactive + noninteractive)
+        within `time_window`.
+        """
+        from itertools import combinations
+
+        sig_df = self._load_or_compute_significance(alpha=0.05, test_window=time_window)
+        if sig_df.empty:
+            logger.warning("No significance results available; skipping violin plotting.")
+            return
+
+        sig_df = sig_df[sig_df["significant"] == True].copy()
+        if sig_df.empty:
+            logger.info("No significant units to plot in violins.")
+            return
+
+        # Extract per-unit metrics for each region
+        regions = [r for r in sig_df["region"].dropna().unique().tolist()]
+        if len(regions) == 0:
+            regions = ["UnknownRegion"]
+
+        per_region = {r: {"max_time": [], "min_time": [], "sum_index": []} for r in regions}
+
+        for region in regions:
+            rdf = sig_df[sig_df["region"] == region] if region != "UnknownRegion" else sig_df[sig_df["region"].isna()]
+            for _, row in rdf.iterrows():
+                t = np.asarray(row["time_axis"], dtype=float)
+                m_int = np.asarray(row["mean_psth_interactive"], dtype=float)
+                m_non = np.asarray(row["mean_psth_non_interactive"], dtype=float)
+                if m_int is None or m_non is None:
+                    continue
+                mask = (t >= time_window[0]) & (t <= time_window[1])
+                if not mask.any():
+                    continue
+                t_win = t[mask]
+                x = m_int[mask]
+                y = m_non[mask]
+
+                denom = x + y
+                idx = np.zeros_like(denom, dtype=float)
+                nz = denom != 0
+                idx[nz] = (x[nz] - y[nz]) / denom[nz]
+
+                # metrics
+                per_region[region]["max_time"].append(float(t_win[np.argmax(idx)]))
+                per_region[region]["min_time"].append(float(t_win[np.argmin(idx)]))
+                per_region[region]["sum_index"].append(float(idx.sum()))
+
+        # Helper to make one violin figure + pairwise p-value table
+        def _make_violin(metric_key: str, y_label: str, title_suffix: str, fname_suffix: str):
+            # Assemble data
+            cats = []
+            data = []
+            means = []
+            for r in regions:
+                vals = np.asarray(per_region[r][metric_key], dtype=float)
+                cats.append(str(r))
+                data.append(vals)
+                means.append(vals.mean() if vals.size > 0 else np.nan)
+
+            # Pairwise Welch t-tests across regions
+            from scipy.stats import ttest_ind
+            pvals = { (a,b): np.nan for a,b in combinations(range(len(regions)), 2) }
+            for i, j in combinations(range(len(regions)), 2):
+                xi, xj = data[i], data[j]
+                if xi.size >= 2 and xj.size >= 2:
+                    pvals[(i, j)] = ttest_ind(xi, xj, equal_var=False, nan_policy="omit").pvalue
+
+            # Figure
+            ctx = rc_context(self._ILLUSTRATOR_RC) if illustrator_friendly else rc_context()
+            with ctx:
+                fig = plt.figure(figsize=(max(6, 1.8 * len(regions)) + 3.0, 4.5))
+                # Main axis for violins
+                ax = fig.add_axes([0.08, 0.15, 0.62, 0.75])
+
+                # Violin plot (kept vector)
+                parts = ax.violinplot(
+                    data,
+                    showmeans=False,
+                    showmedians=False,
+                    showextrema=False,
+                )
+                # Outline violins for editability
+                for pc in parts['bodies']:
+                    pc.set_edgecolor("black")
+                    pc.set_linewidth(0.6)
+                    pc.set_facecolor("lightgray")
+
+                # Overlay means as points + line
+                ax.plot(
+                    np.arange(1, len(regions) + 1),
+                    means,
+                    marker="o",
+                    linewidth=1.0
+                )
+
+                ax.set_xticks(np.arange(1, len(regions) + 1))
+                ax.set_xticklabels(cats, rotation=0)
+                ax.set_ylabel(y_label)
+                ax.set_title(f"{title_suffix}")
+
+                # Pairwise p-value matrix as a side panel (vector text)
+                ax_tbl = fig.add_axes([0.75, 0.15, 0.22, 0.75])
+                ax_tbl.axis("off")
+                # Build a simple text table
+                lines = [f"Pairwise Welch t-tests (p-values)"]
+                for i, j in combinations(range(len(regions)), 2):
+                    rij = f"{cats[i]} vs {cats[j]}: "
+                    pv = pvals[(i, j)]
+                    if np.isnan(pv):
+                        lines.append(rij + "n/a")
+                    else:
+                        lines.append(rij + f"{pv:.3g}")
+                ax_tbl.text(0.0, 1.0, "\n".join(lines), va="top", fontsize=10)
+
+                # Export
+                base_plot_dir = Path(getattr(self.config, "plots_dir", getattr(self.config, "plot_dir", ".")))
+                out_dir = base_plot_dir / "psth" / "interactive_units"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                for ext in export_formats:
+                    out_path = out_dir / f"{out_basename_prefix}_{fname_suffix}.{ext}"
+                    if overwrite or not out_path.exists():
+                        fig.savefig(out_path, bbox_inches="tight")
+                plt.close(fig)
+
+        # Make all three figures
+        _make_violin(
+            metric_key="max_time",
+            y_label="Time of max index (s)",
+            title_suffix="Max index location per region",
+            fname_suffix="max_index_time",
+        )
+        _make_violin(
+            metric_key="sum_index",
+            y_label="Σ Index per unit",
+            title_suffix="Index sum per unit per region",
+            fname_suffix="index_sum",
+        )
+        _make_violin(
+            metric_key="min_time",
+            y_label="Time of min index (s)",
+            title_suffix="Min index location per region",
+            fname_suffix="min_index_time",
+        )
+
