@@ -48,6 +48,8 @@ class FixationConfig(BaseConfig):
             "saccade_to_face",
             "saccade_from_face",
 
+            "object_fixation",
+
             "out_of_roi_fixation",
             "saccade_to_out_of_roi",
             "saccade_from_out_of_roi"

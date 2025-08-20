@@ -447,6 +447,131 @@ class CrossCorrCalculator:
             _make_crosscorr_deltas_plot(df, strategy, plot_dir, alpha=alpha)
 
 
+    def plot_crosscorr_deltas_leader_follower_all_full_facefix(
+        self,
+        alpha: float = 0.05,
+        filename: str | None = None,
+        illustrator_friendly: bool = True,
+    ) -> None:
+        """
+        Single-axes plot of Δ crosscorrelations for the 'by_leader_follower' strategy,
+        restricted to ALL/full/face_fixation→face_fixation.
+        Exports a vector PDF suitable for Illustrator with lines easier to select.
+        """
+        import numpy as np
+        import pandas as pd
+        import matplotlib as mpl
+        import matplotlib.pyplot as plt
+        from pathlib import Path
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if illustrator_friendly:
+            mpl.rcParams["pdf.fonttype"] = 42
+            mpl.rcParams["ps.fonttype"] = 42
+            mpl.rcParams["path.simplify"] = False  # keep paths exact
+
+        # Load results
+        result_path = self.paths.get_analysis_output_path(strategy="by_leader_follower")
+        if not result_path.exists():
+            logger.warning("Result file not found for strategy: by_leader_follower")
+            return
+
+        df = pd.read_pickle(result_path)
+
+        # Restrict rows
+        df = df[
+            (df["monkey_pair"] == "ALL")
+            & (df["period_type"] == "full")
+            & (df["sender_behavior"] == "face_fixation")
+            & (df["receiver_behavior"] == "face_fixation")
+        ]
+        if df.empty:
+            logger.warning("No rows for ALL/full/face_fixation→face_fixation. Nothing to plot.")
+            return
+
+        # Stable order
+        preferred_order = ["leader_to_follower", "follower_to_leader"]
+        unique_labels = list(df["direction_label"].dropna().unique())
+        direction_labels = [x for x in preferred_order if x in unique_labels] + \
+                           [x for x in unique_labels if x not in preferred_order]
+
+        # One axes, aspect ~1:1.2 (height:width)
+        fig, ax = plt.subplots(figsize=(6.0, 5.0))
+
+        cmap = plt.cm.get_cmap("tab10", max(2, len(direction_labels)))
+        color_for = {lbl: cmap(i) for i, lbl in enumerate(direction_labels)}
+        legend_handles = {}
+
+        # Plot each direction
+        for label in direction_labels:
+            rows = df[df["direction_label"] == label]
+            if rows.empty:
+                continue
+            if len(rows) > 1:
+                logger.warning(f"Multiple rows for direction_label='{label}'. Using the first.")
+            row = rows.iloc[0]
+
+            lags = np.asarray(row["lags"], dtype=float) / 1000.0
+            mean_delta = np.asarray(row["mean_delta"], dtype=float)
+            p_vals = np.asarray(row["p_values"], dtype=float)
+            sig_mask = p_vals < alpha
+
+            # Base line (faint)
+            base_line, = ax.plot(
+                lags, mean_delta, color=color_for[label], alpha=0.3, lw=1, clip_on=False
+            )
+
+            # Highlight significant chunks
+            sig_idx = np.where(sig_mask)[0]
+            if sig_idx.size > 0:
+                splits = np.where(np.diff(sig_idx) != 1)[0] + 1
+                chunks = np.split(sig_idx, splits)
+                highlight_line = None
+                for ch in chunks:
+                    highlight_line, = ax.plot(
+                        lags[ch], mean_delta[ch],
+                        color=color_for[label], alpha=1.0, lw=2, clip_on=False
+                    )
+                if label not in legend_handles and highlight_line is not None:
+                    legend_handles[label] = highlight_line
+            else:
+                if label not in legend_handles:
+                    legend_handles[label] = base_line
+
+        # Cosmetics
+        ax.set_xlabel("Lag (s)", fontsize=11)
+        ax.set_ylabel("Δ Crosscorr", fontsize=11)
+        ax.set_title("ALL — face_fixation → face_fixation (full) — by Leader↔Follower", fontsize=13)
+        ax.axhline(0, lw=0.8, color="k", alpha=0.3)
+
+        legend_labels = [lbl for lbl in direction_labels if lbl in legend_handles]
+        ax.legend(
+            [legend_handles[lbl] for lbl in legend_labels],
+            legend_labels,
+            loc="upper right",
+            frameon=False,
+            title="Direction",
+            fontsize=10,
+            title_fontsize=10,
+        )
+
+        fig.tight_layout()
+
+        out_dir = self.config.paths.get_crosscorr_deltas_plot_dir() / "by_leader_follower"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if filename is None:
+            filename = "ALL_full_facefix_by_leader_follower_crosscorr_deltas.pdf"
+        out_path = Path(out_dir) / filename
+
+        fig.savefig(out_path, format="pdf", bbox_inches="tight")
+        plt.close(fig)
+
+
+
+
+
 # ------------------------
 # Cross-correlation helpers
 # ------------------------

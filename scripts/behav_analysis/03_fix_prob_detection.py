@@ -33,7 +33,10 @@ def main():
     # Loop through all modes and compute fixation probabilities
     for mode in fix_prob_config.modes:
         print(f"\n=== Computing fixation probabilities: mode = '{mode}' ===")
-        df = fix_prob_detector.compute_fixation_probabilities(mode)
+
+        # Example usage
+        pairs = [("face", "face"), ("object", "face")] 
+        df = fix_prob_detector.compute_fixation_probabilities(mode, category_pairs=pairs)
         print(df.head(10))
 
 
