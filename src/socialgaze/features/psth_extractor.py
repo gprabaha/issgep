@@ -2,13 +2,17 @@
 
 import os
 import logging
-from typing import Optional
+from typing import Optional, Iterable
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 from joblib import Parallel, delayed
 from scipy.ndimage import gaussian_filter1d
+from pathlib import Path
+import matplotlib.pyplot as plt
+from scipy.stats import ttest_ind
+
 
 from socialgaze.utils.saving_utils import save_df_to_pkl
 from socialgaze.utils.loading_utils import load_df_from_pkl
@@ -185,6 +189,101 @@ class PSTHExtractor:
             return self.avg_int_non_int_face
 
 
+    def compute_interactive_face_significance(
+        self,
+        alpha: float = 0.05,
+        test_window: tuple[float, float] = (-0.45, 0.45),
+        save: bool = True,
+    ) -> pd.DataFrame:
+        """
+        For each unit, test interactive vs non-interactive PSTHs (face fixations only)
+        with per-bin Welch t-tests (no FDR). A unit is 'significant' if any bin in the
+        test window has p < alpha.
+        """
+        if self.psth_per_trial is None:
+            self.fetch_psth("trial_wise")
+
+        df = self.psth_per_trial
+        df_face = df[df["category"] == "face"].copy()
+        if df_face.empty:
+            logger.warning("No face-fixation PSTHs found; skipping significance.")
+            return pd.DataFrame()
+
+        bin_size = self.config.psth_bin_size
+        start_offset, end_offset = self.config.psth_window
+        num_bins = int((end_offset - start_offset) / bin_size)
+        time_axis = (np.linspace(start_offset, end_offset, num_bins + 1)[:-1] + bin_size / 2.0).astype(float)
+
+        valid_bins_mask = (time_axis >= test_window[0]) & (time_axis <= test_window[1])
+        valid_idx = np.where(valid_bins_mask)[0]
+
+        rows = []
+        for unit_id, g in df_face.groupby("unit_uuid"):
+            region = g["region"].iloc[0] if "region" in g.columns else None
+            channel = g["channel"].iloc[0] if "channel" in g.columns else None
+
+            g_int = g[g["is_interactive"] == "interactive"]
+            g_non = g[g["is_interactive"] == "non-interactive"]
+
+            if g_int.empty or g_non.empty:
+                rows.append({
+                    "unit_uuid": unit_id, "region": region, "channel": channel,
+                    "n_interactive": len(g_int), "n_non_interactive": len(g_non),
+                    "significant": False, "significant_bins": [],
+                    "time_axis": time_axis.tolist(),
+                    "mean_psth_interactive": None, "mean_psth_non_interactive": None,
+                })
+                continue
+
+            X = np.stack(g_int["firing_rate"].apply(np.array).values)   # (n_int, num_bins)
+            Y = np.stack(g_non["firing_rate"].apply(np.array).values)   # (n_non, num_bins)
+            if X.shape[1] != num_bins or Y.shape[1] != num_bins:
+                logger.warning(f"Bin mismatch for unit {unit_id}; skipping.")
+                rows.append({
+                    "unit_uuid": unit_id, "region": region, "channel": channel,
+                    "n_interactive": len(g_int), "n_non_interactive": len(g_non),
+                    "significant": False, "significant_bins": [],
+                    "time_axis": time_axis.tolist(),
+                    "mean_psth_interactive": None, "mean_psth_non_interactive": None,
+                })
+                continue
+
+            pvals = np.ones(num_bins, dtype=float)
+            for b in valid_idx:
+                try:
+                    pvals[b] = ttest_ind(X[:, b], Y[:, b], equal_var=False, nan_policy="omit").pvalue
+                except Exception as e:
+                    logger.debug(f"ttest failed for unit {unit_id}, bin {b}: {e}")
+                    pvals[b] = 1.0
+
+            sig_bins = np.where((pvals < alpha) & valid_bins_mask)[0].tolist()
+            is_sig = len(sig_bins) > 0
+
+            rows.append({
+                "unit_uuid": unit_id,
+                "region": region,
+                "channel": channel,
+                "n_interactive": int(len(X)),
+                "n_non_interactive": int(len(Y)),
+                "significant": bool(is_sig),
+                "significant_bins": sig_bins,
+                "time_axis": time_axis.tolist(),
+                "mean_psth_interactive": X.mean(axis=0).tolist(),
+                "mean_psth_non_interactive": Y.mean(axis=0).tolist(),
+            })
+
+        sig_df = pd.DataFrame(rows)
+
+        if save:
+            out_dir = Path(self.config.output_dir) / "results"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / "interactive_face_significance.pkl"
+            save_df_to_pkl(sig_df, str(out_path))
+            logger.info(f"Saved interactive face significance to {out_path}")
+
+        return sig_df
+
+
 #---------------------------------------------------
 # == Support functions for PSTH computing methods ==
 #---------------------------------------------------
@@ -303,3 +402,157 @@ def _process_fixation_row_for_psth(
         "firing_rate": firing_rate.tolist(),
         **unit_metadata
     }
+
+
+
+
+class PSTHPlotter(PSTHExtractor):
+    """
+    Plots:
+      1) Unit PSTHs for significant interactive vs non-interactive (face) units
+      2) Per-region pie charts (significant vs non-significant)
+    """
+
+    def plot_significant_interactive_vs_noninteractive_units(
+        self,
+        alpha: float = 0.05,
+        test_window: tuple[float, float] = (-0.45, 0.45),
+        export_formats: tuple[str, ...] = ("pdf",),
+        overwrite: bool = False,
+    ) -> pd.DataFrame:
+        sig_df = self._load_or_compute_significance(alpha=alpha, test_window=test_window)
+        if sig_df.empty:
+            logger.warning("No significance results available; nothing to plot.")
+            return sig_df
+
+        base_plot_dir = Path(getattr(self.config, "plots_dir", getattr(self.config, "plot_dir", ".")))
+        unit_out_root = base_plot_dir / "psth" / "interactive_units"
+        unit_out_root.mkdir(parents=True, exist_ok=True)
+
+        for region, region_df in sig_df.groupby("region", dropna=False):
+            region_name = str(region) if pd.notna(region) else "UnknownRegion"
+            region_dir = unit_out_root / region_name
+            region_dir.mkdir(parents=True, exist_ok=True)
+
+            # Unit PSTHs for significant units
+            sig_units = region_df[region_df["significant"] == True]
+            if not sig_units.empty:
+                logger.info(f"[{region_name}] Plotting {len(sig_units)} significant unit PSTHs...")
+                for _, row in sig_units.iterrows():
+                    self._plot_single_unit_psth(row=row, region_dir=region_dir,
+                                                export_formats=export_formats, overwrite=overwrite)
+            else:
+                logger.info(f"[{region_name}] No significant units; skipping PSTH plots.")
+
+            # Region pie
+            self._plot_region_significance_pie(
+                region=region_name,
+                region_df=region_df,
+                out_dir=region_dir,
+                export_formats=export_formats,
+                overwrite=overwrite,
+            )
+
+        return sig_df
+
+    # -------- helpers --------
+
+    def _load_or_compute_significance(
+        self,
+        alpha: float,
+        test_window: tuple[float, float],
+    ) -> pd.DataFrame:
+        sig_path = Path(self.config.output_dir) / "results" / "interactive_face_significance.pkl"
+        if sig_path.exists():
+            try:
+                sig_df = load_df_from_pkl(str(sig_path))
+                needed = {"unit_uuid", "region", "significant", "time_axis",
+                          "mean_psth_interactive", "mean_psth_non_interactive"}
+                if needed.issubset(sig_df.columns):
+                    logger.info(f"Loaded significance from {sig_path}")
+                    return sig_df
+                logger.warning(f"Significance file missing columns; recomputing.")
+            except Exception as e:
+                logger.warning(f"Failed to load significance file: {e}; recomputing.")
+
+        return self.compute_interactive_face_significance(alpha=alpha, test_window=test_window, save=True)
+
+    def _plot_single_unit_psth(
+        self,
+        row: pd.Series,
+        region_dir: Path,
+        export_formats: tuple[str, ...],
+        overwrite: bool,
+    ) -> None:
+        unit_id = row["unit_uuid"]
+        time_axis = np.asarray(row["time_axis"], dtype=float)
+        m_int = row["mean_psth_interactive"]
+        m_non = row["mean_psth_non_interactive"]
+        if m_int is None or m_non is None:
+            return
+        m_int = np.asarray(m_int, dtype=float)
+        m_non = np.asarray(m_non, dtype=float)
+        sig_bins = row["significant_bins"] or []
+
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(time_axis, m_int, label="Interactive", linewidth=2)
+        ax.plot(time_axis, m_non, label="Non-interactive", linewidth=2, linestyle="--")
+
+        if len(sig_bins) > 0:
+            spans = _bins_to_spans(sig_bins, time_axis)
+            for (t0, t1) in spans:
+                ax.axvspan(t0, t1, alpha=0.15)
+
+        ax.axvline(0.0, linestyle=":", linewidth=1)
+        ax.set_xlabel("Time from fixation onset (s)")
+        ax.set_ylabel("Firing rate (spikes/s)")
+        ax.set_title(f"Unit {unit_id}")
+        ax.legend(loc="upper right")
+        ax.margins(x=0)
+
+        for ext in export_formats:
+            out_path = region_dir / f"unit_{unit_id}.{ext}"
+            if overwrite or not out_path.exists():
+                fig.savefig(out_path, bbox_inches="tight")
+        plt.close(fig)
+
+    def _plot_region_significance_pie(
+        self,
+        region: str,
+        region_df: pd.DataFrame,
+        out_dir: Path,
+        export_formats: tuple[str, ...],
+        overwrite: bool,
+    ) -> None:
+        n_sig = int(region_df["significant"].sum())
+        n_total = int(len(region_df))
+        n_non = n_total - n_sig
+
+        fig, ax = plt.subplots(figsize=(4.5, 4.5))
+        ax.pie([n_sig, n_non], labels=["Significant", "Not significant"], autopct="%1.0f%%", startangle=90)
+        ax.set_title(f"{region}: Interactive vs Non-interactive (face)")
+
+        for ext in export_formats:
+            out_path = out_dir / f"{region}_interactive_face_signif_pie.{ext}"
+            if overwrite or not out_path.exists():
+                fig.savefig(out_path, bbox_inches="tight")
+        plt.close(fig)
+
+
+def _bins_to_spans(bin_indices: Iterable[int], time_axis: np.ndarray) -> list[tuple[float, float]]:
+    """Convert discrete significant bin indices to contiguous time spans (bin-center based)."""
+    if not bin_indices:
+        return []
+    bin_indices = np.array(sorted(bin_indices), dtype=int)
+    diffs = np.diff(bin_indices)
+    run_starts = np.r_[0, np.where(diffs != 1)[0] + 1]
+    run_ends = np.r_[run_starts[1:] - 1, len(bin_indices) - 1]
+    if len(time_axis) > 1:
+        half = np.median(np.diff(time_axis)) / 2.0
+    else:
+        half = 0.0
+    spans = []
+    for s, e in zip(run_starts, run_ends):
+        i0, i1 = bin_indices[s], bin_indices[e]
+        spans.append((float(time_axis[i0] - half), float(time_axis[i1] + half)))
+    return spans
