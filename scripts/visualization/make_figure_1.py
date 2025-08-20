@@ -46,8 +46,11 @@ def main():
         config=fix_prob_config,
         interactivity_detector=interactivity_detector
     )
-
-    fix_prob_plotter.plot_joint_vs_marginal_violin()
+    
+    for mode in fix_prob_config.modes:
+        print(f"\n=== Plotting fixation probability violins for mode = '{mode}' ===")
+        # Plot all modes
+        fix_prob_plotter.plot_joint_vs_marginal_violin(context=mode)
 
     # calculator = CrossCorrCalculator(
     #     config=crosscorr_config,
