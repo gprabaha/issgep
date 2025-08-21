@@ -50,20 +50,20 @@ def main():
     )
 
     # 1) Compute & cache significance table (stored at: psth_config.output_dir / "results" / interactive_face_significance.pkl)
-    sig_df = plotter.compute_interactive_face_significance()
-    if sig_df is None or sig_df.empty:
-        logger.warning("No significant units table produced; stopping before plotting.")
-        return
+    # sig_df = plotter.compute_interactive_face_significance()
+    # if sig_df is None or sig_df.empty:
+    #     logger.warning("No significant units table produced; stopping before plotting.")
+    #     return
 
     # 2) Make Illustrator‑friendly unit plots + per‑region pies
     #    Output dir: base_config.plots_dir / "psth" / "interactive_units" / <REGION> / ...
-    # plotter.plot_significant_interactive_vs_noninteractive_units()
+    plotter.plot_significant_interactive_vs_noninteractive_units()
 
-    # logger.info(f"Figure 3 assets written under:\n  - {fig3_dir}\n  - {Path(base_config.plots_dir) / 'psth' / 'interactive_units'}")
+    logger.info(f"Figure 3 assets written under:\n  - {fig3_dir}\n  - {Path(base_config.plots_dir) / 'psth' / 'interactive_units'}")
 
-    plotter.plot_region_heatmaps_of_sig_units()
+    # plotter.plot_region_heatmaps_of_sig_units()
 
-    plotter.plot_region_violin_summaries()
+    # plotter.plot_region_violin_summaries()
 
 
 if __name__ == "__main__":

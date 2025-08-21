@@ -519,7 +519,7 @@ class PSTHPlotter(PSTHExtractor):
         alpha: float = 0.05,
         test_window: tuple[float, float] = (-0.5, 0.5),
         export_formats: tuple[str, ...] = ("pdf",),
-        overwrite: bool = False,
+        overwrite: bool = True,
         illustrator_friendly: bool = True,
     ) -> pd.DataFrame:
         """
@@ -760,7 +760,7 @@ class PSTHPlotter(PSTHExtractor):
     def plot_region_heatmaps_of_sig_units(
         self,
         export_formats: tuple[str, ...] = ("pdf",),
-        overwrite: bool = False,
+        overwrite: bool = True,
         illustrator_friendly: bool = True,
         time_window: tuple[float, float] = (-0.5, 0.5),
         outfile_basename: str = "region_sig_unit_index_heatmaps",
@@ -770,11 +770,11 @@ class PSTHPlotter(PSTHExtractor):
             (interactive - noninteractive) / (interactive + noninteractive)
         for SIGNIFICANT units within `time_window`.
 
-        Rows = units (sorted by argmax time per unit, low→high)
+        Rows = units (sorted by argmax time per unit, early → late; earlier on top)
         Columns = time bins
         Top:   column sums
-        Right: row sums
-        Ticks: show time ticks and rough unit-number ticks on each panel
+        Right: row sums (no y-ticks)
+        Titles: region name with n_sig / n_total units
         """
         from matplotlib.colors import TwoSlopeNorm
         import matplotlib.gridspec as gridspec
@@ -784,6 +784,8 @@ class PSTHPlotter(PSTHExtractor):
             logger.warning("No significance results available; skipping heatmap plotting.")
             return
 
+        # Keep both sig and non-sig for denominator of "total"
+        all_df = sig_df.copy()
         sig_df = sig_df[sig_df["significant"] == True].copy()
         if sig_df.empty:
             logger.info("No significant units to plot.")
@@ -792,17 +794,17 @@ class PSTHPlotter(PSTHExtractor):
         region_mats = {}
         global_min, global_max = np.inf, -np.inf
 
-        regions = [r for r in sig_df["region"].dropna().unique().tolist()]
+        regions = [r for r in all_df["region"].dropna().unique().tolist()]
         if len(regions) == 0:
             regions = ["UnknownRegion"]
 
         for region in regions:
+            total_units = len(all_df[all_df["region"] == region]) if region != "UnknownRegion" else len(all_df[all_df["region"].isna()])
             rdf = sig_df[sig_df["region"] == region] if region != "UnknownRegion" else sig_df[sig_df["region"].isna()]
             if rdf.empty:
                 continue
 
             mats, unit_ids, time_centers = [], [], None
-
             for _, row in rdf.iterrows():
                 t = np.asarray(row["time_axis"], dtype=float)
                 m_int = np.asarray(row["mean_psth_interactive"], dtype=float)
@@ -829,18 +831,16 @@ class PSTHPlotter(PSTHExtractor):
             if len(mats) == 0:
                 continue
 
-            M = np.vstack(mats)  # [n_units, n_time]
-
-            # Sort by argmax location, low → high
+            M = np.vstack(mats)
             sort_keys = np.argmax(M, axis=1)
-            order = np.argsort(sort_keys, kind="stable")
+            order = np.argsort(sort_keys, kind="stable")[::-1]  # reversed → early maxima at top
             M = M[order]
             unit_ids = [unit_ids[i] for i in order]
 
             global_min = min(global_min, float(M.min()))
             global_max = max(global_max, float(M.max()))
 
-            region_mats[region] = (M, time_centers, unit_ids)
+            region_mats[region] = (M, time_centers, unit_ids, total_units)
 
         if not region_mats:
             logger.info("No region matrices constructed; nothing to plot.")
@@ -864,7 +864,7 @@ class PSTHPlotter(PSTHExtractor):
             for ci, region in enumerate(regions):
                 if region not in region_mats:
                     continue
-                M, t_centers, unit_ids = region_mats[region]
+                M, t_centers, unit_ids, total_units = region_mats[region]
                 n_units, _ = M.shape
 
                 dt = np.median(np.diff(t_centers)) if len(t_centers) > 1 else 1.0
@@ -896,38 +896,55 @@ class PSTHPlotter(PSTHExtractor):
                 ax_top.axvline(0.0, linestyle=":", linewidth=1)
                 ax_top.set_xlim(time_window)
                 ax_top.set_ylabel("Σ rows", fontsize=9)
-                # Show x ticks on the heatmap; keep some ticks on top for context
                 ax_top.set_xticks(np.linspace(time_window[0], time_window[1], 5))
                 ax_top.set_xticklabels([f"{x:.2f}" for x in np.linspace(time_window[0], time_window[1], 5)], fontsize=8)
 
-                # Row sums
-                row_sums = M.sum(axis=1)
-                y_idx = np.arange(n_units)
-                ax_right.barh(y_idx + 0.5, row_sums, height=1.0)
-                ax_right.set_xlabel("Σ cols", fontsize=9)
-                ax_right.yaxis.set_ticks([])
 
-                # Heatmap axis ticks & labels
+                # ---- heatmap y-ticks (make sure they exist & are visible) ----
                 ax_heat.set_xlim(time_window)
                 ax_heat.set_ylim(0, n_units)
                 ax_heat.set_xlabel("Time from fixation onset (s)")
                 ax_heat.axvline(0.0, linestyle=":", linewidth=1)
 
-                # Time ticks
+                # time ticks
                 ax_heat.set_xticks(np.linspace(time_window[0], time_window[1], 5))
                 ax_heat.set_xticklabels([f"{x:.2f}" for x in np.linspace(time_window[0], time_window[1], 5)], fontsize=9)
 
-                # Rough unit-number ticks (centers)
+                # unit-number ticks at row centers
                 if n_units > 0:
                     step = max(1, n_units // 10)
                     ytick_pos = np.arange(0.5, n_units + 0.5, step)
                     ytick_lab = [str(int(i + 0.5)) for i in np.arange(0, n_units, step)]
                     ax_heat.set_yticks(ytick_pos)
                     ax_heat.set_yticklabels(ytick_lab, fontsize=9)
-                ax_heat.set_ylabel("Units (sorted by argmax ↑)")
+                ax_heat.set_ylabel("Units (sorted by argmax ↓ early→late)")
+
+                # ---- right marginal (row sums), perfectly aligned to heatmap rows ----
+                row_sums = M.sum(axis=1)              # length n_units
+                y_centers = np.arange(n_units) + 0.5  # row centers match pcolormesh cells
+
+                # draw bars centered on row centers; height=1.0 to match cell height
+                ax_right.barh(y_centers, row_sums, height=1.0, align="center")
+
+                # lock y-limits to heatmap so bars and cells line up exactly
+                ax_right.set_ylim(ax_heat.get_ylim())
+
+                # keep x label
+                ax_right.set_xlabel("Σ cols", fontsize=9)
+
+                # hide only ax_right's tick artists (not the shared locator/formatter)
+                for tick in ax_right.yaxis.get_major_ticks():
+                    tick.label1.set_visible(False)
+                    tick.label2.set_visible(False)
+                    tick.tick1line.set_visible(False)
+                    tick.tick2line.set_visible(False)
+
+                # hide y spines on the right panel only
+                ax_right.spines["left"].set_visible(False)
+                ax_right.spines["right"].set_visible(False)
 
                 pretty_region = str(region) if region is not None else "UnknownRegion"
-                ax_top.set_title(f"{pretty_region} (n={n_units} sig units)", pad=6)
+                ax_top.set_title(f"{pretty_region} (n={n_units}/{total_units} sig units)", pad=6)
 
             if mappables:
                 cax = fig.add_axes([0.92, 0.15, 0.015, 0.7])
@@ -942,10 +959,12 @@ class PSTHPlotter(PSTHExtractor):
                     fig.savefig(out_path, bbox_inches="tight")
             plt.close(fig)
 
+
+
     def plot_region_violin_summaries(
         self,
         export_formats: tuple[str, ...] = ("pdf",),
-        overwrite: bool = False,
+        overwrite: bool = True,
         illustrator_friendly: bool = True,
         time_window: tuple[float, float] = (-0.5, 0.5),
         out_basename_prefix: str = "region_violin",
@@ -1018,57 +1037,96 @@ class PSTHPlotter(PSTHExtractor):
 
             # Pairwise Welch t-tests across regions
             from scipy.stats import ttest_ind
-            pvals = { (a,b): np.nan for a,b in combinations(range(len(regions)), 2) }
+            from itertools import combinations
+            pvals = { (a, b): np.nan for a, b in combinations(range(len(regions)), 2) }
             for i, j in combinations(range(len(regions)), 2):
                 xi, xj = data[i], data[j]
                 if xi.size >= 2 and xj.size >= 2:
                     pvals[(i, j)] = ttest_ind(xi, xj, equal_var=False, nan_policy="omit").pvalue
 
+            # Colors per region (Tab10)
+            import matplotlib.pyplot as plt
+            cmap = plt.get_cmap("tab10")
+            region_colors = [cmap(i % 10) for i in range(len(regions))]
+
             # Figure
             ctx = rc_context(self._ILLUSTRATOR_RC) if illustrator_friendly else rc_context()
             with ctx:
-                fig = plt.figure(figsize=(max(6, 1.8 * len(regions)) + 3.0, 4.5))
+                fig = plt.figure(figsize=(max(6, 1.8 * len(regions)) + 3.0, 4.8))
                 # Main axis for violins
-                ax = fig.add_axes([0.08, 0.15, 0.62, 0.75])
+                ax = fig.add_axes([0.08, 0.15, 0.62, 0.76])
 
-                # Violin plot (kept vector)
+                # Violin plot (vector). We'll recolor bodies individually.
                 parts = ax.violinplot(
                     data,
                     showmeans=False,
                     showmedians=False,
                     showextrema=False,
                 )
-                # Outline violins for editability
-                for pc in parts['bodies']:
+
+                # Color and outline each violin body
+                for i, pc in enumerate(parts["bodies"]):
+                    pc.set_facecolor(region_colors[i])
                     pc.set_edgecolor("black")
-                    pc.set_linewidth(0.6)
-                    pc.set_facecolor("lightgray")
+                    pc.set_linewidth(0.8)
 
-                # Overlay means as points + line
-                ax.plot(
-                    np.arange(1, len(regions) + 1),
-                    means,
-                    marker="o",
-                    linewidth=1.0
-                )
+                # Quartiles (Q1, Median, Q3) per group as horizontal ticks sized to violin width
+                # Also overlay individual data points with light jitter
+                rng = np.random.default_rng(0)  # deterministic jitter
+                for i, vals in enumerate(data, start=1):
+                    if vals.size == 0:
+                        continue
+                    q1, med, q3 = np.percentile(vals, [25, 50, 75])
 
-                ax.set_xticks(np.arange(1, len(regions) + 1))
+                    # Determine violin half-width from polygon extents
+                    body = parts["bodies"][i - 1]
+                    verts = body.get_paths()[0].vertices
+                    x_min, x_max = float(np.min(verts[:, 0])), float(np.max(verts[:, 0]))
+                    half_w = (x_max - x_min) / 2.0
+                    tick_w = min(half_w * 0.9, 0.3)  # keep neat width
+
+                    # Draw quartile ticks (vector lines)
+                    ax.hlines(q1, i - tick_w, i + tick_w, linewidth=1.0, colors="black")
+                    ax.hlines(med, i - tick_w, i + tick_w, linewidth=1.4, colors="black")
+                    ax.hlines(q3, i - tick_w, i + tick_w, linewidth=1.0, colors="black")
+
+                    # Overlay data points (no alpha, subtle jitter)
+                    jitter = rng.uniform(-min(0.08, half_w * 0.4), min(0.08, half_w * 0.4), size=vals.size)
+                    ax.scatter(
+                        np.full(vals.shape, i) + jitter,
+                        vals,
+                        s=10,              # marker size
+                        marker="o",
+                        edgecolors="black",
+                        linewidths=0.4,
+                        facecolors="white",  # high contrast over colored violin
+                        zorder=3,
+                    )
+
+                # Overlay means as points + thin connecting line
+                x_pos = np.arange(1, len(regions) + 1)
+                ax.plot(x_pos, means, color="black", linewidth=1.0)
+                ax.scatter(x_pos, means, color="black", s=20, zorder=4)
+
+                # Cosmetics
+                ax.set_xticks(x_pos)
                 ax.set_xticklabels(cats, rotation=0)
                 ax.set_ylabel(y_label)
                 ax.set_title(f"{title_suffix}")
 
+                # Legend mapping region -> color (vector patches)
+                from matplotlib.patches import Patch
+                legend_handles = [Patch(facecolor=region_colors[i], edgecolor="black", label=cats[i]) for i in range(len(cats))]
+                ax.legend(handles=legend_handles, frameon=False, loc="upper left", bbox_to_anchor=(1.02, 1.0))
+
                 # Pairwise p-value matrix as a side panel (vector text)
-                ax_tbl = fig.add_axes([0.75, 0.15, 0.22, 0.75])
+                ax_tbl = fig.add_axes([0.75, 0.15, 0.22, 0.76])
                 ax_tbl.axis("off")
-                # Build a simple text table
                 lines = [f"Pairwise Welch t-tests (p-values)"]
                 for i, j in combinations(range(len(regions)), 2):
                     rij = f"{cats[i]} vs {cats[j]}: "
                     pv = pvals[(i, j)]
-                    if np.isnan(pv):
-                        lines.append(rij + "n/a")
-                    else:
-                        lines.append(rij + f"{pv:.3g}")
+                    lines.append(rij + ("n/a" if np.isnan(pv) else f"{pv:.3g}"))
                 ax_tbl.text(0.0, 1.0, "\n".join(lines), va="top", fontsize=10)
 
                 # Export
@@ -1080,6 +1138,7 @@ class PSTHPlotter(PSTHExtractor):
                     if overwrite or not out_path.exists():
                         fig.savefig(out_path, bbox_inches="tight")
                 plt.close(fig)
+
 
         # Make all three figures
         _make_violin(
