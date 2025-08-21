@@ -470,6 +470,94 @@ class PCProjectorPlotter(PCProjector):
         plt.close(fig)
 
 
+    def plot_evr_row_fit_interactive(
+        self,
+        export_pdf: bool = True,
+        pdf_name: str | None = None,
+    ):
+        """
+        Make a 1xN row (N = regions) of EVR bar plots for int_nonint_face:
+        - Fit PCA on interactive (face_interactive)
+        - Bars show EVR on interactive (blue) and EVR when projecting non-interactive (orange)
+        Y-axis is shared across subplots and scaled to the data (not forced to 1).
+        """
+        self._apply_illustrator_rc()
+
+        comparison = "int_non_int_face"
+        label_int, label_non = self._labels_for_comparison(comparison)  # ("face_interactive", "face_non_interactive")
+        df = self.psth_extractor.fetch_psth(comparison)
+        regions = list(df["region"].unique())
+        if not regions:
+            logger.warning("No regions found for EVR plotting.")
+            return
+
+        # Colors to match trajectories
+        blue = plt.get_cmap("Blues")(0.85)
+        orange = plt.get_cmap("Oranges")(0.85)
+
+        # ---- First pass: compute EVRs and track global ymax ----
+        evr_by_region = {}  # region -> (evr_int_on_int, evr_int_on_non)
+        y_max = 0.0
+
+        for region in regions:
+            region_df = df[df["region"] == region]
+            X_int = self._build_matrix(region_df, label_int)
+            X_non = self._build_matrix(region_df, label_non)
+
+            n_components = self.pca_config.n_components
+            pca_int = PCA(n_components=n_components).fit(X_int)
+
+            evr_int_on_int = pca_int.explained_variance_ratio_
+            evr_int_on_non = self._explained_var_on_data(pca_int, X_non)
+
+            # Keep consistent length across series (defensive)
+            k = min(len(evr_int_on_int), len(evr_int_on_non))
+            evr_int_on_int = evr_int_on_int[:k]
+            evr_int_on_non = evr_int_on_non[:k]
+
+            evr_by_region[str(region)] = (evr_int_on_int, evr_int_on_non)
+            # Track max bar height across all regions/PCs
+            y_max = max(y_max, float(np.nanmax([evr_int_on_int, evr_int_on_non])))
+
+        # Add a little headroom; do not clamp to 1
+        y_top = y_max * 1.12 if y_max > 0 else 1.0
+
+        # ---- Second pass: plot with shared y ----
+        ncols = len(regions)
+        fig, axs = plt.subplots(1, ncols, figsize=(4.2 * ncols, 3.8), sharey=True)
+        if ncols == 1:
+            axs = [axs]
+
+        for j, region in enumerate(regions):
+            ax = axs[j]
+            evr_int_on_int, evr_int_on_non = evr_by_region[str(region)]
+            k = len(evr_int_on_int)
+            pcs = np.arange(1, k + 1)
+
+            w = 0.38
+            ax.bar(pcs - w / 2, evr_int_on_int, width=w, color=blue,   edgecolor="black", linewidth=0.6, label="Interactive")
+            ax.bar(pcs + w / 2, evr_int_on_non, width=w, color=orange, edgecolor="black", linewidth=0.6, label="Non-interactive")
+
+            ax.set_title(str(region))
+            ax.set_xticks(pcs)
+            ax.set_xlabel("PC")
+            ax.set_ylim(0, y_top)
+            if j == 0:
+                ax.set_ylabel("Explained Variance Ratio")
+                ax.legend(frameon=False)
+
+        fig.suptitle("int_nonint_face — PCA fit on Interactive; EVR on Interactive vs Non-interactive", y=0.98)
+        fig.tight_layout()
+
+        if export_pdf:
+            out = self.pca_config.evr_bars_dir / (pdf_name if pdf_name else "int_nonint_face__evr_row_fit_interactive.pdf")
+            fig.savefig(out)
+            logger.info(f"Exported: {out}")
+
+        plt.close(fig)
+
+
+
 
     # -------------------- Helpers / Internals --------------------
 
@@ -576,31 +664,93 @@ class PCProjectorPlotter(PCProjector):
 
     # ---- Violin helper (points + quartiles) ----
     def _violin_with_points(self, ax, data: List[np.ndarray], cats: List[str], ylab: str):
+        """
+        Illustrator-friendly violins:
+        - Remove clip paths from violin artists (no axes-sized clip in AI)
+        - Quartile bars/medians as individual Line2D (clip_off)
+        - Raw points as individual markers (no PathCollection), clip_off
+        """
+        import matplotlib as mpl
+
+        # Robust y-lims + small padding
+        all_vals = np.concatenate([np.asarray(v, float) for v in data if len(v) > 0]) if any(len(v) for v in data) else np.array([0.0])
+        ylo = np.nanmin(all_vals); yhi = np.nanmax(all_vals)
+        if not np.isfinite(ylo) or not np.isfinite(yhi) or yhi == ylo:
+            ylo, yhi = 0.0, 1.0
+        pad = 0.03 * (yhi - ylo if yhi > ylo else 1.0)
+        ax.set_ylim(ylo - pad, yhi + pad)
+
+        # Create violins (no medians/extrema; we draw quartiles ourselves)
         parts = ax.violinplot(data, showmedians=False, showextrema=False)
-        # Color each violin differently and add quartiles
-        for i, b in enumerate(parts['bodies']):
-            b.set_alpha(0.7)
-            # simple distinct hues
-            b.set_facecolor(plt.cm.tab10(i % 10))
-            b.set_edgecolor("black")
-            b.set_linewidth(0.8)
 
-            vals = np.asarray(data[i], dtype=float)
-            if vals.size:
-                q1, q2, q3 = np.nanpercentile(vals, [25, 50, 75])
-                ax.plot([i+1, i+1], [q1, q3], lw=2.0, color="black")  # IQR bar
-                ax.scatter([i+1], [q2], s=16, zorder=3, edgecolor="black", facecolor="white")  # median
+        # Ensure *all* returned artists have no clip path
+        if isinstance(parts, dict):
+            artists = []
+            for k, v in parts.items():
+                if k == "bodies":
+                    artists.extend(v)
+                elif v is not None:
+                    artists.append(v)
+        else:
+            # Older mpl may return a ViolinPlot container
+            artists = list(getattr(parts, "bodies", []))
 
-        # Overlay raw points (jittered)
+        # Style violin bodies & remove clip paths
+        for i, body in enumerate(getattr(parts, "bodies", artists)):
+            body.set_alpha(1.0)
+            body.set_facecolor(plt.cm.tab10(i % 10))
+            body.set_edgecolor("black")
+            body.set_linewidth(0.8)
+            body.set_clip_on(False)
+            body.set_clip_path(None)       # <- crucial for Illustrator
+            try:
+                body.set_gid(f"violin_body_{i}")  # optional: helps selection
+            except Exception:
+                pass
+
+        # Also remove clip paths from any non-body artists (defensive)
+        if isinstance(parts, dict):
+            for k, v in parts.items():
+                if k == "bodies" or v is None:
+                    continue
+                try:
+                    v.set_clip_on(False)
+                    v.set_clip_path(None)
+                except Exception:
+                    pass
+
+        # Quartiles (IQR + median), one per category, no clipping
+        for i, vals in enumerate(data, start=1):
+            vals = np.asarray(vals, dtype=float)
+            if vals.size == 0 or not np.isfinite(vals).any():
+                continue
+            q1, q2, q3 = np.nanpercentile(vals, [25, 50, 75])
+            ax.plot([i, i], [q1, q3], lw=2.0, color="black", clip_on=False, zorder=3)
+            ax.plot([i], [q2], marker="o", markersize=4.0, mfc="white", mec="black", mew=0.8,
+                    linestyle="None", clip_on=False, zorder=4)
+
+        # Raw points as individual markers (no PathCollection), no clip
+        rng = np.random.default_rng(42)
+        def _lighten(rgba, f=0.35):
+            r, g, b, a = rgba
+            return (r + (1-r)*f, g + (1-g)*f, b + (1-b)*f, 1.0)
+
         for i, vals in enumerate(data, start=1):
             if len(vals) == 0:
                 continue
-            x = np.random.normal(i, 0.03, size=len(vals))
-            ax.scatter(x, vals, s=6, alpha=0.6, edgecolor="none")
+            vals = np.asarray(vals, dtype=float)
+            x = rng.normal(loc=i, scale=0.03, size=len(vals))
+            color = _lighten(plt.cm.tab10((i-1) % 10))
+            for xi, yi in zip(x, vals):
+                if np.isfinite(yi):
+                    ax.plot([xi], [yi], marker="o", markersize=2.5,
+                            mfc=color, mec="none", linestyle="None",
+                            clip_on=False, zorder=2)
 
-        ax.set_xticks(range(1, len(cats)+1))
+        ax.set_xticks(range(1, len(cats) + 1))
         ax.set_xticklabels([str(c) for c in cats], rotation=0)
         ax.set_ylabel(ylab)
+
 
     def _pval_summary(self, title: str, pvals: Dict[Tuple[int, int], float], regions: List[str]) -> str:
         # Short inline summary: e.g., "Distance — p(LIP vs OFC)=0.012, ..."

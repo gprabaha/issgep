@@ -78,27 +78,46 @@ def _build_pipeline():
     return psth_extractor, pca_config
 
 
-def run_for(plotter: PCProjectorPlotter, comparison: str, pick_views: bool, export_row: bool, export_violins: bool):
+def run_for(
+    plotter: PCProjectorPlotter,
+    comparison: str,
+    pick_views: bool,
+    export_row: bool,
+    export_violins: bool,
+    export_evr_row: bool,
+):
     """Run requested plotting actions for a single comparison."""
+    # Normalize alias
+    comp_key = comparison
+
     if pick_views:
-        logger.info(f"[{comparison}] Picking 3D views (press 'S' in each window to save)...")
-        plotter.pick_3d_views_for(comparison)
+        logger.info(f"[{comp_key}] Picking 3D views (press 'S' in each window to save)...")
+        plotter.pick_3d_views_for(comp_key)
 
     if export_row:
-        logger.info(f"[{comparison}] Exporting single-row PC trajectory panel...")
-        plotter.plot_pc_timeseries_row(comparison=comparison, export_pdf=True)
+        logger.info(f"[{comp_key}] Exporting single-row PC trajectory panel...")
+        plotter.plot_pc_timeseries_row(comparison=comp_key, export_pdf=True)
 
     if export_violins:
-        logger.info(f"[{comparison}] Exporting distance/angle violin plots...")
-        plotter.plot_violin_distance_angle(comparison=comparison, export_pdf=True)
+        logger.info(f"[{comp_key}] Exporting distance/angle violin plots...")
+        plotter.plot_violin_distance_angle(comparison=comp_key, export_pdf=True)
+
+    if export_evr_row:
+        if comp_key == "int_non_int_face":
+            logger.info(f"[{comp_key}] Exporting EVR row (fit on interactive; explain non-interactive)...")
+            plotter.plot_evr_row_fit_interactive(export_pdf=True)
+        else:
+            logger.info(f"[{comp_key}] Skipping EVR row (only defined for 'int_nonint_face').")
+
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Make Figure 4: 3D PC trajectories with cached views and violin plots."
+        description="Make Figure 4: 3D PC trajectories, EVR row, and violin plots."
     )
     parser.add_argument(
         "--comparison",
+        # accept both spellings; code normalizes internally
         choices=["face_obj", "int_non_int_face", "both"],
         default="both",
         help="Which comparison(s) to process."
@@ -119,12 +138,18 @@ def parse_args() -> argparse.Namespace:
         help="Export distance/angle violin plots with pairwise stats."
     )
     parser.add_argument(
+        "--export-evr-row",
+        action="store_true",
+        help="Export EVR row (PCA fit on interactive; shows EVR on interactive & non-interactive)."
+    )
+    parser.add_argument(
         "--loglevel",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Logging verbosity."
     )
     return parser.parse_args()
+
 
 
 def main():
@@ -141,11 +166,11 @@ def main():
     )
 
     if args.comparison in ("face_obj", "int_non_int_face"):
-        run_for(plotter, args.comparison, args.pick_views, args.export_row, args.export_violins)
+        run_for(plotter, args.comparison, args.pick_views, args.export_row, args.export_violins, args.export_evr_row)
     else:
         # both
-        run_for(plotter, "face_obj", args.pick_views, args.export_row, args.export_violins)
-        run_for(plotter, "int_non_int_face", args.pick_views, args.export_row, args.export_violins)
+        run_for(plotter, "face_obj", args.pick_views, args.export_row, args.export_violins, args.export_evr_row)
+        run_for(plotter, "int_non_int_face", args.pick_views, args.export_row, args.export_violins, args.export_evr_row)
 
     logger.info("== Done. ==")
 
