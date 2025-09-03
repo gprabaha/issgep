@@ -765,35 +765,29 @@ class FixationPlotter(FixationDetector):
             export_dir = (self.config.output_dir / "plots" / "fixation_timelines" /
                           datetime.now().strftime("%Y-%m-%d"))
 
-        # ---- Either export one run, or all runs ----
-        targets: list[tuple[str, int]]
         if export_pdf_for is not None:
             targets = [(export_pdf_for[0], int(export_pdf_for[1]))]
+            fmt = "pdf"     # FORCE PDF for this specific export
         else:
-            # all keys present in recs
             targets = sorted(recs.keys(), key=lambda x: (x[0], int(x[1])))
+            fmt = "png"     # default for batch export
 
-        # ---- Export loop ----
-        for session, run in tqdm(targets, desc="Plotting run"):
+        for session, run in tqdm(targets, desc="Plot timeline for run"):
             if (session, run) not in recs:
                 logger.warning(f"No vectors at {(session, run)}; skipping.")
                 continue
 
             segs_dict, total_time_sec = _prepare_one_run_multi(
-                session=session,
-                run=int(run),
+                session=session, run=int(run),
                 payload=recs[(session, run)],
                 run_lengths_df=run_lengths_df,
                 bin_size_seconds=style.bin_size_seconds,
             )
 
-            # ensure session subfolder
             session_dir = export_dir / session
             session_dir.mkdir(parents=True, exist_ok=True)
 
-            # base path; extension is added inside exporter
             base = session_dir / f"{session}__run{run}__fixation_timelines"
-
             _export_seven_band_single_run(
                 segs_dict=segs_dict,
                 total_time_sec=total_time_sec,
@@ -801,10 +795,10 @@ class FixationPlotter(FixationDetector):
                 run=int(run),
                 out_basepath=base,
                 style=style,
+                export_format=fmt,               # << here
                 font_family=style.font_family,
-                export_format="pdf",   # force PDF as requested
             )
-            logger.info(f"Saved PDF: {base.with_suffix('.pdf')}")
+            logger.info(f"Saved {fmt.upper()}: {base.with_suffix('.' + fmt)}")
 
 # =========================
 # NEW helpers
@@ -949,56 +943,42 @@ def _export_seven_band_single_run(
     run: int,
     out_basepath: Path,
     style: FaceFixPlotStyle,
-    export_format: str = "pdf",
-    font_family: str = "Arial",
+    export_format: str = "png",
+    font_family: str = "DejaVu Sans",
 ) -> Path:
-    """
-    Illustrator-friendly export: draws each chunk as an individual Rectangle.
-    No BrokenBarH, no clipping, no rasterization, transparent background.
-    Row order (top->bottom):
-      1 m1_face, 2 m1_obj, 3 m1_out, 4 m2_face, 5 m2_out, 6 m1_face&m2_face, 7 m1_obj&m2_face
-    """
-    # ---- Ensure color keys exist (fallbacks if style not extended) ----
+
+    # Colors (as before) ...
     default_colors = {
-        "m1_face":        style.colors.get("m1",            "#3b82f6"),
-        "m1_obj":         style.colors.get("m1_object",     "#10b981"),
-        "m1_out":         style.colors.get("m1_out",        "#6b7280"),
-        "m2_face":        style.colors.get("m2",            "#f59e0b"),
-        "m2_out":         style.colors.get("m2_out",        "#a78bfa"),
-        "m1face_m2face":  style.colors.get("m1face_m2face", "#ef4444"),
-        "m1obj_m2face":   style.colors.get("m1obj_m2face",  "#111827"),
+        "m1_face":        style.colors.get("m1",           "#3b82f6"),
+        "m1_obj":         style.colors.get("m1_object",    "#9467bd"),
+        "m1_out":         style.colors.get("m1_out",       "#8c564b"),
+        "m2_face":        style.colors.get("m2",           "#f59e0b"),
+        "m2_out":         style.colors.get("m2_out",       "#e377c2"),
+        "m1face_m2face":  style.colors.get("m1face_m2face","#d62728"),
+        "m1obj_m2face":   style.colors.get("m1obj_m2face", "#7f7f7f"),
     }
 
-    rc = {
-        "font.family": "sans-serif",
-        "font.sans-serif": [font_family],
-        "text.usetex": False,
-
-        # Keep text as text (no outlines), avoid masks/clips
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-        "svg.fonttype": "none",
-
-        # Export settings
-        "savefig.transparent": True,
-        "savefig.bbox": None,
-        "savefig.pad_inches": 0.01,
-        "path.simplify": False,
-    }
     out_path = out_basepath.with_suffix("." + export_format.lower())
 
-    with mpl.rc_context(rc):
-        f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height * 1.25))
+    # RC: keep text as text in vector formats
+    rc = {
+        "font.family": "sans-serif",
+        "font.sans-serif": [font_family, "Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
+        "text.usetex": False,
+        "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
+        "savefig.transparent": True,
+        "path.simplify": False,
+    }
 
-        # No background to avoid clipping masks in Illustrator
+    with mpl.rc_context(rc):
+        f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height))
+
+        # transparent background, no clips
         ax.patch.set_visible(False)
         f.patch.set_alpha(0.0)
         ax.set_facecolor("none")
 
-        # Geometry
         a, bh = style.a, style.bar_height
-
-        # Top -> bottom rows
         row_order = [
             ("m1_face",       7 * a),
             ("m1_obj",        6 * a),
@@ -1014,20 +994,18 @@ def _export_seven_band_single_run(
             for (x, w) in segs:
                 if w <= 0:
                     continue
-                rect = mpatches.Rectangle((x, y0), w, bh,
-                                          facecolor=color, edgecolor="none", linewidth=0)
+                rect = mpatches.Rectangle((x, y0), w, bh, facecolor=color,
+                                          edgecolor="none", linewidth=0)
                 rect.set_clip_on(False)
                 rect.set_clip_path(None)
                 rect.set_rasterized(False)
                 ax.add_patch(rect)
 
-        # Draw rows
         for key, y in row_order:
             segs = segs_dict.get(key, [])
             if segs:
                 _add_rects(segs, y, default_colors[key])
 
-        # Axes cosmetics
         ax.set_xlim(0, total_time_sec)
         ax.set_ylim(0, 8 * a)
         ax.set_yticks([y for _, y in row_order])
@@ -1041,13 +1019,24 @@ def _export_seven_band_single_run(
         ax.set_title(f"{session} • run {run}", fontsize=10)
         ax.grid(False)
 
-        # Important: avoid tight_layout to prevent any implicit clip paths
-        f.savefig(out_path, format=export_format, dpi=300, transparent=True, metadata={
-            "Title": f"{session} run {run} fixation timelines",
-            "Subject": "Fixation timelines (m1/m2 face, object, out-of-ROI, and combos).",
-        })
-        plt.close(f)
+        # --- Margin management to avoid truncation ---
+        # Use subplots_adjust (not tight_layout) to keep vectors clean for PDF.
+        # A generous left/bottom margin works well across labels.
+        f.subplots_adjust(left=0.22, right=0.98, top=0.90, bottom=0.18)
 
+        if export_format.lower() == "pdf":
+            # Avoid bbox='tight' to prevent clip paths in Illustrator
+            f.savefig(out_path, format="pdf", dpi=300, transparent=True, metadata={
+                "Title": f"{session} run {run} fixation timelines",
+                "Subject": "Fixation timelines (m1/m2 face, object, out-of-ROI, and combos).",
+            })
+        else:
+            # PNG: safe to use tight bbox so labels never get cut
+            f.savefig(out_path, format="png", dpi=300, transparent=True,
+                      bbox_inches="tight", pad_inches=0.1)
+
+        plt.close(f)
     return out_path
+
 
 
