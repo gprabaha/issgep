@@ -784,7 +784,7 @@ class FixationPlotter(FixationDetector):
                 bin_size_seconds=style.bin_size_seconds,
             )
 
-            session_dir = export_dir / session
+            session_dir = export_dir # / session
             session_dir.mkdir(parents=True, exist_ok=True)
 
             base = session_dir / f"{session}__run{run}__fixation_timelines"
@@ -959,6 +959,7 @@ def _export_seven_band_single_run(
     }
 
     out_path = out_basepath.with_suffix("." + export_format.lower())
+    is_pdf = export_format.lower() == "pdf"
 
     # RC: keep text as text in vector formats
     rc = {
@@ -966,17 +967,26 @@ def _export_seven_band_single_run(
         "font.sans-serif": [font_family, "Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
         "text.usetex": False,
         "pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
-        "savefig.transparent": True,
+        # Do NOT rely on this for PNG; we’ll pass transparent explicitly per format.
+        "savefig.transparent": True if is_pdf else False,
         "path.simplify": False,
     }
 
     with mpl.rc_context(rc):
         f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height))
 
-        # transparent background, no clips
-        ax.patch.set_visible(False)
-        f.patch.set_alpha(0.0)
-        ax.set_facecolor("none")
+        # === BACKGROUND BEHAVIOR ===
+        if is_pdf:
+            # Keep vector-friendly transparency for Illustrator
+            ax.patch.set_visible(False)
+            ax.set_facecolor("none")
+            f.patch.set_facecolor("none")
+            # f.patch.set_alpha(0.0)  # not needed; facecolor="none" is sufficient
+        else:
+            # PNGs: use white background so nothing looks “checkered”
+            ax.patch.set_visible(True)
+            ax.set_facecolor("white")
+            f.patch.set_facecolor("white")
 
         a, bh = style.a, style.bar_height
         row_order = [
@@ -1024,17 +1034,24 @@ def _export_seven_band_single_run(
         # A generous left/bottom margin works well across labels.
         f.subplots_adjust(left=0.22, right=0.98, top=0.90, bottom=0.18)
 
-        if export_format.lower() == "pdf":
-            # Avoid bbox='tight' to prevent clip paths in Illustrator
+        if is_pdf:
+            # Keep it transparent; avoid bbox='tight' (can introduce masks)
             f.savefig(out_path, format="pdf", dpi=300, transparent=True, metadata={
                 "Title": f"{session} run {run} fixation timelines",
                 "Subject": "Fixation timelines (m1/m2 face, object, out-of-ROI, and combos).",
             })
         else:
-            # PNG: safe to use tight bbox so labels never get cut
-            f.savefig(out_path, format="png", dpi=300, transparent=True,
-                      bbox_inches="tight", pad_inches=0.1)
-
+            # PNG: opaque white background and tight bbox so labels aren’t cut
+            f.savefig(
+                out_path,
+                format="png",
+                dpi=300,
+                transparent=False,
+                bbox_inches="tight",
+                pad_inches=0.1,
+                facecolor=f.get_facecolor(),   # ensures white canvas in output
+                edgecolor="none",
+            )
         plt.close(f)
     return out_path
 
