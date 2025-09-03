@@ -448,7 +448,6 @@ class FixationDetector:
 
     # == Binary vector generation helpers == #
 
-
     def _generate_binary_vector_df_for_behavior(self, behavior_type: str) -> Optional[pd.DataFrame]:
         df, filter_column = self._get_filtered_behavior_dataframe(behavior_type)
         if df is None or df.empty:
@@ -846,35 +845,6 @@ def _draw_three_band_panel_fast(ax, segs_m1, segs_m2, segs_both, total_time_sec,
     ax.set_title(title, fontsize=10)
     ax.grid(False)
 
-
-def _draw_three_band_panel_editable(ax, segs_m1, segs_m2, segs_both, total_time_sec, style: FaceFixPlotStyle, title: str):
-    """
-    Editable renderer for export: draws one Rectangle per segment so each bar is individually selectable in Illustrator.
-    """
-    a = style.a
-    bh = style.bar_height
-
-    def _add_rects(segs, y_center, color):
-        y0 = y_center - bh / 2.0
-        for (x, w) in segs:
-            if w <= 0:
-                continue
-            rect = mpatches.Rectangle((x, y0), width=w, height=bh, facecolor=color, edgecolor="none")
-            rect.set_clip_on(False)
-            rect.set_clip_path(None)
-            ax.add_patch(rect)
-
-    _add_rects(segs_m1,   3 * a, style.colors["m1"])
-    _add_rects(segs_m2,   2 * a, style.colors["m2"])
-    _add_rects(segs_both, 1 * a, style.colors["both"])
-
-    ax.set_xlim(0, total_time_sec)
-    ax.set_ylim(0, 4 * a)
-    ax.set_yticks([a, 2 * a, 3 * a])
-    ax.set_yticklabels(["m1 & m2", "m2", "m1"])
-    ax.set_xlabel("Time (s)")
-    ax.set_title(title, fontsize=10)
-    ax.grid(False)
 
 
 def _make_preview_grid(
