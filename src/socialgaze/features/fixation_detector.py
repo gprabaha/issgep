@@ -18,6 +18,9 @@ from typing import Dict, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import matplotlib.patches as mpatches
+import matplotlib.font_manager as fm
+from dataclasses import dataclass
+from typing import Dict
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -658,7 +661,6 @@ def _categorize_fixations(location: List[str]) -> str:
 
 
 
-
 # =========================
 # Style / config for plots
 # =========================
@@ -673,35 +675,81 @@ class FaceFixPlotStyle:
     tight_layout: bool = True
     max_cols: int = 5
 
-    # NEW:
-    export_format: str = "pdf"     # "pdf" or "svg"
-    font_family: str = "Arial"     # a font Illustrator has
+    # Export options
+    export_format: str = "pdf"
+    font_family: str = None   # will be auto-selected if not given
 
     def __post_init__(self):
         if self.colors is None:
-            self.colors = {"m1": "#1f77b4", "m2": "#2ca02c", "both": "#d62728"}
+            self.colors = {
+                "m1": "#1f77b4",             # blue
+                "m2": "#2ca02c",             # green
+                "m1face_m2face": "#d62728",  # red
+                "m1_object": "#9467bd",      # purple
+                "m1_out": "#8c564b",         # brown
+                "m2_out": "#e377c2",         # pink
+                "m1obj_m2face": "#7f7f7f",   # gray
+            }
+
+        if self.font_family is None:
+            self.font_family = self._choose_font()
+
+    def _choose_font(self) -> str:
+        """Pick first available font from a preference list."""
+        candidates = ["Arial", "Helvetica", "DejaVu Sans"]
+        available = set(fm.get_font_names())
+        for cand in candidates:
+            if cand in available:
+                return cand
+        # fallback
+        return "sans-serif"
 
 
 
-# ==================================
-# Plotter that inherits the detector
-# ==================================
+# -------------------------
+# NEW: category name keys
+# -------------------------
+_FACE_KEY = "face_fixation"
+_OBJ_KEY  = "object_fixation"          # m1 only (as you said)
+_OOR_KEY  = "out_of_roi_fixation"      # assumes this is your key
+
+
+# -------------------------
+# UPDATED method: export every run as PDF (no previews)
+# -------------------------
 class FixationPlotter(FixationDetector):
-    def plot_face_fixation_timelines(
+    def plot_fixation_timelines(
         self,
-        n_samples: int = 5,
-        seed: int | None = None,
-        export_pdf_for: Tuple[str, int] | None = None,
+        export_pdf_for: Tuple[str, int] | None = None,  # optional: export just one run
         export_dir: Path | None = None,
         style: FaceFixPlotStyle | None = None,
     ) -> None:
+        """
+        Export per-run fixation timelines as Illustrator-friendly PDFs with 7 rows:
+          m1: face, object, out_of_roi
+          m2: face, out_of_roi
+          combos: (m1_face & m2_face), (m1_object & m2_face)
+        """
         style = style or FaceFixPlotStyle()
 
-        face_df = self.get_binary_vector_df("face_fixation")
-        for col in ("session_name", "run_number", "agent", "binary_vector"):
-            if col not in face_df.columns:
-                raise KeyError(f"Required column '{col}' missing in face_df.")
+        # ---- Load binary-vector DFs ----
+        face_df = self.get_binary_vector_df(_FACE_KEY)
+        obj_df  = self.get_binary_vector_df(_OBJ_KEY)
+        try:
+            oor_df = self.get_binary_vector_df(_OOR_KEY)
+        except Exception:
+            oor_df = None  # allow projects that don't have out_of_roi yet
 
+        for df, name in ((face_df, "face_df"), (obj_df, "obj_df")):
+            for col in ("session_name", "run_number", "agent", "binary_vector"):
+                if col not in df.columns:
+                    raise KeyError(f"Required column '{col}' missing in {name}.")
+        if oor_df is not None:
+            for col in ("session_name", "run_number", "agent", "binary_vector"):
+                if col not in oor_df.columns:
+                    raise KeyError(f"Required column '{col}' missing in oor_df.")
+
+        # ---- Optionally fetch run lengths ----
         run_lengths_df = None
         try:
             self.gaze_data.load_dataframes(["run_lengths"])
@@ -709,73 +757,174 @@ class FixationPlotter(FixationDetector):
         except Exception:
             pass
 
-        recs = _collect_face_vectors(face_df)
+        # ---- Collect vectors per (session, run) ----
+        recs = _collect_multi_vectors(face_df, obj_df, oor_df)
 
+        # ---- Output root: <plots/fixation_timelines/<today>/<session>> ----
         if export_dir is None:
             export_dir = (self.config.output_dir / "plots" / "fixation_timelines" /
                           datetime.now().strftime("%Y-%m-%d"))
-        export_dir.mkdir(parents=True, exist_ok=True)
 
-        # ---- EXPORT-ONLY MODE ----
+        # ---- Either export one run, or all runs ----
+        targets: list[tuple[str, int]]
         if export_pdf_for is not None:
-            session, run = export_pdf_for
-            segs_m1, segs_m2, segs_both, total_time_sec = _prepare_one_run(
+            targets = [(export_pdf_for[0], int(export_pdf_for[1]))]
+        else:
+            # all keys present in recs
+            targets = sorted(recs.keys(), key=lambda x: (x[0], int(x[1])))
+
+        # ---- Export loop ----
+        for session, run in tqdm(targets, desc="Plotting run"):
+            if (session, run) not in recs:
+                logger.warning(f"No vectors at {(session, run)}; skipping.")
+                continue
+
+            segs_dict, total_time_sec = _prepare_one_run_multi(
                 session=session,
                 run=int(run),
-                recs=recs,
+                payload=recs[(session, run)],
                 run_lengths_df=run_lengths_df,
                 bin_size_seconds=style.bin_size_seconds,
             )
 
-            # build path WITHOUT forcing an extension here; helper sets it
-            base = export_dir / f"{session}__run{run}__face_fixation_timelines"
-            out_path = _export_single_run(
-                segs_m1, segs_m2, segs_both, total_time_sec,
-                session=session, run=int(run),
+            # ensure session subfolder
+            session_dir = export_dir / session
+            session_dir.mkdir(parents=True, exist_ok=True)
+
+            # base path; extension is added inside exporter
+            base = session_dir / f"{session}__run{run}__fixation_timelines"
+
+            _export_seven_band_single_run(
+                segs_dict=segs_dict,
+                total_time_sec=total_time_sec,
+                session=session,
+                run=int(run),
                 out_basepath=base,
                 style=style,
-                export_format=style.export_format,
                 font_family=style.font_family,
+                export_format="pdf",   # force PDF as requested
             )
-            logger.info(f"Saved {style.export_format.upper()}: {out_path}")
-            return
-
-        # ---- PREVIEW GRID MODE ----
-        both_keys = [(s, r) for (s, r), d in recs.items() if "m1" in d and "m2" in d]
-        if not both_keys:
-            logger.warning("No (session, run) with both m1 and m2 face-fixation vectors.")
-            return
-
-        rng = random.Random(seed)
-        sampled = rng.sample(both_keys, k=min(n_samples, len(both_keys)))
-
-        fig = _make_preview_grid(
-            sampled=sampled,
-            recs=recs,
-            run_lengths_df=run_lengths_df,
-            max_cols=style.max_cols,
-            style=style,
-        )
-
-        if style.tight_layout:
-            plt.tight_layout()
-        plt.show()
-
-
+            logger.info(f"Saved PDF: {base.with_suffix('.pdf')}")
 
 # =========================
-# Helpers (module-level)
+# NEW helpers
 # =========================
-def _collect_face_vectors(face_df) -> Dict[Tuple[str, int], Dict[str, np.ndarray]]:
-    """Return {(session, run): {'m1': vec, 'm2': vec}} using 'binary_vector'."""
-    recs: Dict[Tuple[str, int], Dict[str, np.ndarray]] = {}
-    for _, row in face_df.iterrows():
-        agent = row["agent"]
-        if agent not in ("m1", "m2"):
-            continue
-        key = (row["session_name"], int(row["run_number"]))
-        recs.setdefault(key, {})[agent] = np.asarray(row["binary_vector"], dtype=bool)
+def _collect_multi_vectors(face_df, obj_df, oor_df):
+    """
+    Build:
+      recs[(session, run)] = {
+          'm1_face': np.bool_,
+          'm2_face': np.bool_,
+          'm1_obj' : np.bool_,                # m1 only
+          'm1_out' : np.bool_ or None,        # optional if oor_df missing
+          'm2_out' : np.bool_ or None,
+      }
+    """
+    recs: dict[tuple[str, int], dict[str, np.ndarray | None]] = {}
+
+    def _assign(df, agent_filter, key_name):
+        for _, row in df.iterrows():
+            agent = row["agent"]
+            if agent not in agent_filter:
+                continue
+            k = (row["session_name"], int(row["run_number"]))
+            recs.setdefault(k, {})
+            recs[k][key_name if isinstance(key_name, str) else key_name(agent)] = \
+                np.asarray(row["binary_vector"], dtype=bool)
+
+    # faces for both agents
+    _assign(face_df, {"m1"}, "m1_face")
+    _assign(face_df, {"m2"}, "m2_face")
+
+    # objects: only m1
+    _assign(obj_df, {"m1"}, "m1_obj")
+
+    # out-of-roi (if present)
+    if oor_df is not None:
+        def _key(agent): return "m1_out" if agent == "m1" else "m2_out"
+        _assign(oor_df, {"m1", "m2"}, _key)
+
+    # fill missing optional keys with None
+    for k in recs:
+        for name in ("m1_out", "m2_out"):
+            recs[k].setdefault(name, None)
+
     return recs
+
+
+def _align_and_truncate(*arrays, L_hint=None):
+    """Align by min length (or L_hint if smaller); returns truncated arrays and L."""
+    arrays = [a for a in arrays if a is not None]
+    if not arrays:
+        return [], 0
+    L = min(len(a) for a in arrays)
+    if L_hint is not None:
+        L = min(L, int(L_hint))
+    return [a[:L] for a in arrays], L
+
+
+def _prepare_one_run_multi(
+    session: str,
+    run: int,
+    payload: dict,
+    run_lengths_df,
+    bin_size_seconds: float,
+):
+    """
+    Build segments for all requested rows and AND-combos.
+    Returns:
+      segs_dict: dict with keys:
+        'm1_face','m1_obj','m1_out','m2_face','m2_out',
+        'm1face_m2face','m1obj_m2face'
+      total_time_sec
+    """
+    # Optional run-length cap
+    L_cap = None
+    if run_lengths_df is not None:
+        m = run_lengths_df[
+            (run_lengths_df["session_name"] == session) &
+            (run_lengths_df["run_number"] == int(run))
+        ]
+        if not m.empty and "length" in m.columns:
+            L_cap = int(m.iloc[0]["length"])
+
+    m1_face = payload.get("m1_face")
+    m2_face = payload.get("m2_face")
+    m1_obj  = payload.get("m1_obj")
+    m1_out  = payload.get("m1_out")
+    m2_out  = payload.get("m2_out")
+
+    # Determine master L by existing main tracks (prefer m1_face/m2_face)
+    base_vecs = [v for v in (m1_face, m2_face, m1_obj, m1_out, m2_out) if v is not None]
+    _, L = _align_and_truncate(*base_vecs, L_hint=L_cap)
+    if L == 0:
+        raise KeyError(f"No non-empty vectors for {(session, run)}.")
+
+    def _cut(v):
+        return None if v is None else v[:L]
+
+    m1_face = _cut(m1_face)
+    m2_face = _cut(m2_face)
+    m1_obj  = _cut(m1_obj)
+    m1_out  = _cut(m1_out)
+    m2_out  = _cut(m2_out)
+
+    # Combos
+    m1face_m2face = (m1_face & m2_face) if (m1_face is not None and m2_face is not None) else None
+    m1obj_m2face  = (m1_obj  & m2_face) if (m1_obj  is not None and m2_face is not None) else None
+
+    # Build segments
+    segs_dict = {
+        "m1_face": _segments_from_binary(m1_face, bin_size_seconds) if m1_face is not None else [],
+        "m1_obj":  _segments_from_binary(m1_obj,  bin_size_seconds) if m1_obj  is not None else [],
+        "m1_out":  _segments_from_binary(m1_out,  bin_size_seconds) if m1_out  is not None else [],
+        "m2_face": _segments_from_binary(m2_face, bin_size_seconds) if m2_face is not None else [],
+        "m2_out":  _segments_from_binary(m2_out,  bin_size_seconds) if m2_out  is not None else [],
+        "m1face_m2face": _segments_from_binary(m1face_m2face, bin_size_seconds) if m1face_m2face is not None else [],
+        "m1obj_m2face":  _segments_from_binary(m1obj_m2face,  bin_size_seconds) if m1obj_m2face  is not None else [],
+    }
+    total_time_sec = L * bin_size_seconds
+    return segs_dict, total_time_sec
 
 
 def _segments_from_binary(vec: np.ndarray, bin_size_seconds: float) -> List[Tuple[float, float]]:
@@ -793,168 +942,112 @@ def _segments_from_binary(vec: np.ndarray, bin_size_seconds: float) -> List[Tupl
     ]
 
 
-def _prepare_one_run(
+def _export_seven_band_single_run(
+    segs_dict: dict,
+    total_time_sec: float,
     session: str,
     run: int,
-    recs: Dict[Tuple[str, int], Dict[str, np.ndarray]],
-    run_lengths_df,
-    bin_size_seconds: float,
-):
-    """Align vectors, compute AND, build segments, return (segs_m1, segs_m2, segs_both, total_time_sec)."""
-    key = (session, int(run))
-    if key not in recs or "m1" not in recs[key] or "m2" not in recs[key]:
-        raise KeyError(f"No face-fixation vectors for both agents at {key}.")
-
-    v1 = recs[key]["m1"]
-    v2 = recs[key]["m2"]
-    L = min(len(v1), len(v2))
-
-    if run_lengths_df is not None:
-        m = run_lengths_df[
-            (run_lengths_df["session_name"] == session) &
-            (run_lengths_df["run_number"] == int(run))
-        ]
-        if not m.empty and "length" in m.columns:
-            L = min(L, int(m.iloc[0]["length"]))
-
-    v1 = v1[:L]
-    v2 = v2[:L]
-    v_both = v1 & v2
-
-    segs_m1 = _segments_from_binary(v1, bin_size_seconds)
-    segs_m2 = _segments_from_binary(v2, bin_size_seconds)
-    segs_both = _segments_from_binary(v_both, bin_size_seconds)
-    total_time_sec = L * bin_size_seconds
-
-    return segs_m1, segs_m2, segs_both, total_time_sec
-
-
-def _draw_three_band_panel_fast(ax, segs_m1, segs_m2, segs_both, total_time_sec, style: FaceFixPlotStyle, title: str):
-    """Fast renderer for previews: uses BrokenBarHCollection (not individually editable in Illustrator)."""
-    a = style.a
-    bh = style.bar_height
-    ax.broken_barh(segs_m1,   (3 * a - bh / 2, bh), facecolors=style.colors["m1"],   edgecolors="none")
-    ax.broken_barh(segs_m2,   (2 * a - bh / 2, bh), facecolors=style.colors["m2"],   edgecolors="none")
-    ax.broken_barh(segs_both, (1 * a - bh / 2, bh), facecolors=style.colors["both"], edgecolors="none")
-
-    ax.set_xlim(0, total_time_sec)
-    ax.set_ylim(0, 4 * a)
-    ax.set_yticks([a, 2 * a, 3 * a])
-    ax.set_yticklabels(["m1 & m2", "m2", "m1"])
-    ax.set_xlabel("Time (s)")
-    ax.set_title(title, fontsize=10)
-    ax.grid(False)
-
-
-
-def _make_preview_grid(
-    sampled, recs, run_lengths_df, max_cols: int, style: FaceFixPlotStyle,
-):
-    """(unchanged except it now calls the *fast* drawer)"""
-    import math
-    n_panels = len(sampled)
-    n_cols = min(max_cols, n_panels)
-    n_rows = math.ceil(n_panels / n_cols)
-
-    fig, axes = plt.subplots(
-        n_rows, n_cols,
-        figsize=(style.per_run_width * n_cols, style.per_run_height * n_rows),
-        squeeze=False
-    )
-
-    for idx, (session, run) in enumerate(sampled):
-        r_i, c_i = divmod(idx, n_cols)
-        ax = axes[r_i, c_i]
-
-        segs_m1, segs_m2, segs_both, total_time_sec = _prepare_one_run(
-            session=session, run=int(run),
-            recs=recs,
-            run_lengths_df=run_lengths_df,
-            bin_size_seconds=style.bin_size_seconds,
-        )
-
-        _draw_three_band_panel_fast(
-            ax=ax,
-            segs_m1=segs_m1, segs_m2=segs_m2, segs_both=segs_both,
-            total_time_sec=total_time_sec,
-            style=style,
-            title=f"{session} • run {run}",
-        )
-
-    # Hide unused cells
-    for idx in range(n_panels, n_rows * n_cols):
-        r_i, c_i = divmod(idx, n_cols)
-        axes[r_i, c_i].axis("off")
-
-    return fig
-
-
-def _export_single_run(
-    segs_m1, segs_m2, segs_both, total_time_sec,
-    session: str, run: int,
     out_basepath: Path,
     style: FaceFixPlotStyle,
     export_format: str = "pdf",
     font_family: str = "Arial",
 ) -> Path:
+    """
+    Illustrator-friendly export: draws each chunk as an individual Rectangle.
+    No BrokenBarH, no clipping, no rasterization, transparent background.
+    Row order (top->bottom):
+      1 m1_face, 2 m1_obj, 3 m1_out, 4 m2_face, 5 m2_out, 6 m1_face&m2_face, 7 m1_obj&m2_face
+    """
+    # ---- Ensure color keys exist (fallbacks if style not extended) ----
+    default_colors = {
+        "m1_face":        style.colors.get("m1",            "#3b82f6"),
+        "m1_obj":         style.colors.get("m1_object",     "#10b981"),
+        "m1_out":         style.colors.get("m1_out",        "#6b7280"),
+        "m2_face":        style.colors.get("m2",            "#f59e0b"),
+        "m2_out":         style.colors.get("m2_out",        "#a78bfa"),
+        "m1face_m2face":  style.colors.get("m1face_m2face", "#ef4444"),
+        "m1obj_m2face":   style.colors.get("m1obj_m2face",  "#111827"),
+    }
+
     rc = {
         "font.family": "sans-serif",
         "font.sans-serif": [font_family],
         "text.usetex": False,
 
-        # Keep text as text (not shapes)
-        "pdf.fonttype": 42,       # TrueType; Illustrator keeps text editable
+        # Keep text as text (no outlines), avoid masks/clips
+        "pdf.fonttype": 42,
         "ps.fonttype": 42,
-        "svg.fonttype": "none",   # keep text as <text> in SVG
+        "svg.fonttype": "none",
 
-        # Export/figure settings
+        # Export settings
         "savefig.transparent": True,
         "savefig.bbox": None,
         "savefig.pad_inches": 0.01,
         "path.simplify": False,
     }
-
     out_path = out_basepath.with_suffix("." + export_format.lower())
 
     with mpl.rc_context(rc):
-        f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height))
+        f, ax = plt.subplots(1, 1, figsize=(style.per_run_width, style.per_run_height * 1.25))
 
-        # No axes background that could become a clipping mask
+        # No background to avoid clipping masks in Illustrator
         ax.patch.set_visible(False)
         f.patch.set_alpha(0.0)
         ax.set_facecolor("none")
 
-        # draw per-rect bars (no clipping)
+        # Geometry
         a, bh = style.a, style.bar_height
+
+        # Top -> bottom rows
+        row_order = [
+            ("m1_face",       7 * a),
+            ("m1_obj",        6 * a),
+            ("m1_out",        5 * a),
+            ("m2_face",       4 * a),
+            ("m2_out",        3 * a),
+            ("m1face_m2face", 2 * a),
+            ("m1obj_m2face",  1 * a),
+        ]
+
         def _add_rects(segs, y_center, color):
             y0 = y_center - bh / 2.0
             for (x, w) in segs:
                 if w <= 0:
                     continue
-                rect = mpatches.Rectangle((x, y0), w, bh, facecolor=color, edgecolor="none", linewidth=0)
+                rect = mpatches.Rectangle((x, y0), w, bh,
+                                          facecolor=color, edgecolor="none", linewidth=0)
                 rect.set_clip_on(False)
                 rect.set_clip_path(None)
                 rect.set_rasterized(False)
                 ax.add_patch(rect)
 
-        _add_rects(segs_m1,   3 * a, style.colors["m1"])
-        _add_rects(segs_m2,   2 * a, style.colors["m2"])
-        _add_rects(segs_both, 1 * a, style.colors["both"])
+        # Draw rows
+        for key, y in row_order:
+            segs = segs_dict.get(key, [])
+            if segs:
+                _add_rects(segs, y, default_colors[key])
 
+        # Axes cosmetics
         ax.set_xlim(0, total_time_sec)
-        ax.set_ylim(0, 4 * a)
-        ax.set_yticks([a, 2 * a, 3 * a])
-        ax.set_yticklabels(["m1 & m2", "m2", "m1"])
+        ax.set_ylim(0, 8 * a)
+        ax.set_yticks([y for _, y in row_order])
+        ax.set_yticklabels([
+            "m1 face", "m1 object", "m1 out-of-ROI",
+            "m2 face", "m2 out-of-ROI",
+            "m1_face & m2_face",
+            "m1_object & m2_face",
+        ])
         ax.set_xlabel("Time (s)")
         ax.set_title(f"{session} • run {run}", fontsize=10)
         ax.grid(False)
 
-        # Avoid tight_layout on export; can reintroduce clips
+        # Important: avoid tight_layout to prevent any implicit clip paths
         f.savefig(out_path, format=export_format, dpi=300, transparent=True, metadata={
-            "Title": f"{session} run {run} face fixation timelines",
-            "Subject": "Face-fixation timelines for m1, m2, and overlap",
+            "Title": f"{session} run {run} fixation timelines",
+            "Subject": "Fixation timelines (m1/m2 face, object, out-of-ROI, and combos).",
         })
         plt.close(f)
 
     return out_path
+
 

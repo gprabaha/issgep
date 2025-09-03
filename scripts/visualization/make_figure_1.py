@@ -31,26 +31,21 @@ def main():
     fixation_detector = FixationDetector(gaze_data=gaze_data, config=fixation_config)
     interactivity_detector = InteractivityDetector(config=interactivity_config)
 
-    # # Initialize plotter (inherits from FixationDetector, uses same data/config)
-    # fixation_plotter = FixationPlotter(gaze_data=gaze_data, config=fixation_config)
-    # # === EXPORT SINGLE RUN PDFs ===
-    # fixation_plotter.plot_face_fixation_timelines(
-    #     export_pdf_for=("02062018", 8)
-    # )
-    # fixation_plotter.plot_face_fixation_timelines(
-    #     export_pdf_for=("09042018", 3)
-    # )
+    # Initialize plotter (inherits from FixationDetector, uses same data/config)
+    fixation_plotter = FixationPlotter(gaze_data=gaze_data, config=fixation_config)
+    # === EXPORT SINGLE RUN PDFs ===
+    fixation_plotter.plot_fixation_timelines()
 
-    fix_prob_plotter = FixProbPlotter(
-        fixation_detector=fixation_detector,
-        config=fix_prob_config,
-        interactivity_detector=interactivity_detector
-    )
+    # fix_prob_plotter = FixProbPlotter(
+    #     fixation_detector=fixation_detector,
+    #     config=fix_prob_config,
+    #     interactivity_detector=interactivity_detector
+    # )
     
-    for mode in fix_prob_config.modes:
-        print(f"\n=== Plotting fixation probability violins for mode = '{mode}' ===")
-        # Plot all modes
-        fix_prob_plotter.plot_joint_vs_marginal_violin(context=mode)
+    # for mode in fix_prob_config.modes:
+    #     print(f"\n=== Plotting fixation probability violins for mode = '{mode}' ===")
+    #     # Plot all modes
+    #     fix_prob_plotter.plot_joint_vs_marginal_violin(context=mode)
 
     # calculator = CrossCorrCalculator(
     #     config=crosscorr_config,
