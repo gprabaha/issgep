@@ -71,32 +71,33 @@ def main():
         detector.update_saccade_from_to()
         logger.info("Reconciling label mismatches...")
         detector.reconcile_fixation_saccade_label_mismatches()
+        # Add categories and save
+        logger.info("Adding fixation category column...")
+        detector.add_fixation_category_column()
+        detector.add_saccade_category_column()
+        detector.save_dataframes()
+        logger.info("Saved final fixation and saccade dataframes.")
+        # Safely log summary info
+        logger.info("Fixations df head:")
+        if detector.fixations is not None and not detector.fixations.empty:
+            logger.info(detector.fixations.head())
+        else:
+            logger.warning("Fixations dataframe is None or empty.")
+
+        logger.info("Saccades df head:")
+        if detector.saccades is not None and not detector.saccades.empty:
+            logger.info(detector.saccades.head())
+        else:
+            logger.warning("Saccades dataframe is None or empty.")
     else:
         logger.info("Skipping ROI label updates...")
 
-    # Add categories and save
-    logger.info("Adding fixation category column...")
-    detector.add_fixation_category_column()
-    detector.save_dataframes()
-    logger.info("Saved final fixation and saccade dataframes.")
 
     # Generate binary vectors (on-disk only)
     logger.info("Generating and saving all binary vector dataframes...")
     detector.generate_and_save_binary_vectors()
 
-    # Safely log summary info
-    logger.info("Fixations df head:")
-    if detector.fixations is not None and not detector.fixations.empty:
-        logger.info(detector.fixations.head())
-    else:
-        logger.warning("Fixations dataframe is None or empty.")
-
-    logger.info("Saccades df head:")
-    if detector.saccades is not None and not detector.saccades.empty:
-        logger.info(detector.saccades.head())
-    else:
-        logger.warning("Saccades dataframe is None or empty.")
-
+    # Log paths and sample data
     logger.info("Binary vector paths:")
     if hasattr(detector, "binary_vector_paths") and detector.binary_vector_paths:
         for btype, path in detector.binary_vector_paths.items():
